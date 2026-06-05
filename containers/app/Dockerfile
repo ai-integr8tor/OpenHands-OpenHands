@@ -26,6 +26,7 @@ RUN apt-get update -y \
     && apt-get install -y curl make git build-essential jq gettext \
     && python3 -m pip install "poetry==${POETRY_VERSION}" --break-system-packages
 
+COPY vendor ./vendor
 COPY pyproject.toml poetry.lock ./
 RUN touch README.md
 RUN export POETRY_CACHE_DIR && poetry install --no-root && rm -rf $POETRY_CACHE_DIR
@@ -74,6 +75,7 @@ ENV VIRTUAL_ENV=/app/.venv \
     PYTHONPATH='/app'
 
 COPY --chown=openhands:openhands --chmod=770 --from=backend-builder ${VIRTUAL_ENV} ${VIRTUAL_ENV}
+COPY --chown=openhands:openhands --chmod=770 ./vendor ./vendor
 
 # Pin pip to a known-good version (reproducible builds) and fix CVE-2025-8869
 # Pin both venv pip and system pip (Trivy scans both)

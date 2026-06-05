@@ -28,11 +28,17 @@ class EventCallbackStatus(Enum):
 
 def upgrade() -> None:
     """Upgrade schema."""
+    event_callback_status_enum = sa.Enum(
+        EventCallbackStatus,
+        name='eventcallbackstatus',
+    )
+    event_callback_status_enum.create(op.get_bind(), checkfirst=True)
+
     op.add_column(
         'event_callback',
         sa.Column(
             'status',
-            sa.Enum(EventCallbackStatus),
+            event_callback_status_enum,
             nullable=False,
             server_default='ACTIVE',
         ),
@@ -40,13 +46,17 @@ def upgrade() -> None:
     op.add_column(
         'event_callback',
         sa.Column(
-            'updated_at', sa.DateTime, nullable=False, server_default=sa.func.now()
+            'updated_at',
+            sa.DateTime,
+            nullable=False,
+            server_default=sa.func.now(),
         ),
     )
     op.drop_index('ix_event_callback_result_event_id')
     op.drop_column('event_callback_result', 'event_id')
     op.add_column(
-        'event_callback_result', sa.Column('event_id', sa.String, nullable=True)
+        'event_callback_result',
+        sa.Column('event_id', sa.String, nullable=True),
     )
     op.create_index(
         op.f('ix_event_callback_result_event_id'),
@@ -63,7 +73,8 @@ def downgrade() -> None:
     op.drop_index('ix_event_callback_result_event_id')
     op.drop_column('event_callback_result', 'event_id')
     op.add_column(
-        'event_callback_result', sa.Column('event_id', sa.UUID, nullable=True)
+        'event_callback_result',
+        sa.Column('event_id', sa.UUID, nullable=True),
     )
     op.create_index(
         op.f('ix_event_callback_result_event_id'),
@@ -71,3 +82,9 @@ def downgrade() -> None:
         ['event_id'],
         unique=False,
     )
+
+    event_callback_status_enum = sa.Enum(
+        EventCallbackStatus,
+        name='eventcallbackstatus',
+    )
+    event_callback_status_enum.drop(op.get_bind(), checkfirst=True)

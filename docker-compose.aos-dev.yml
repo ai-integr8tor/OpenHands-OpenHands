@@ -1,0 +1,77 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: aos-openhands-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: openhands
+      POSTGRES_USER: openhands
+      POSTGRES_PASSWORD: openhands_dev_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - aos_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U openhands -d openhands"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: aos-openhands-pgadmin
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@example.com
+      PGADMIN_DEFAULT_PASSWORD: admin12345
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+    ports:
+      - "5050:80"
+    volumes:
+      - aos_pgadmin_data:/var/lib/pgadmin
+    depends_on:
+      - postgres
+
+  openhands:
+    build:
+      context: ./
+      dockerfile: ./containers/app/Dockerfile
+    image: aos-openhands:dev
+    container_name: aos-openhands-app
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      AGENT_SERVER_IMAGE_REPOSITORY: ghcr.io/openhands/agent-server
+      AGENT_SERVER_IMAGE_TAG: 1.25.0-python
+
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: openhands
+      DB_USER: openhands
+      DB_PASS: openhands_dev_password
+
+      WORKSPACE_MOUNT_PATH: /opt/workspace_base
+      WORKSPACE_BASE: /opt/workspace_base
+
+      FILE_STORE: local
+      FILE_STORE_PATH: /.openhands
+
+      SANDBOX_USER_ID: 0
+      SANDBOX_STARTUP_GRACE_SECONDS: 120
+    ports:
+      - "3000:3000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - aos_openhands_data:/.openhands
+      - ./workspace:/opt/workspace_base
+    stdin_open: true
+    tty: true
+
+volumes:
+  aos_postgres_data:
+  aos_pgadmin_data:
+  aos_openhands_data:
