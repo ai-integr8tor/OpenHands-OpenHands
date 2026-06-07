@@ -289,6 +289,28 @@ def get_supported_llm_models(
 
     openhands_models = get_openhands_models(verified_models)
 
+    # Always inject the curated Databricks model list as the seeded baseline so
+    # the picker shows the same set as the CLI — regardless of env vars.
+    # If DATABRICKS_HOST + token are set, additionally merge live-discovered
+    # endpoints (deduplicated, curated names win).
+    try:
+        from openhands.sdk.llm.providers.databricks.discovery import (
+            CURATED_DATABRICKS_MODELS,
+            list_models_from_env,
+        )
+
+        # Bare names (without the "databricks/" prefix) for the general list;
+        # _assign_provider() will add the prefix later.
+        curated_names: list[str] = [e.name for e in CURATED_DATABRICKS_MODELS]
+        live_names: list[str] = list_models_from_env()
+        # Curated first so they sort-dedupe cleanly; live adds workspace extras.
+        seen: dict[str, None] = dict.fromkeys(curated_names)
+        for name in live_names:
+            seen.setdefault(name, None)
+        model_list = model_list + list(seen)
+    except Exception as e:
+        logger.debug('Databricks model discovery skipped: %s', e)
+
     # Assign canonical provider prefixes to bare LiteLLM names, then dedupe.
     all_models = (
         openhands_models + CLARIFAI_MODELS + [_assign_provider(m) for m in model_list]
