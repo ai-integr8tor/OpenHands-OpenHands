@@ -1,6 +1,4 @@
-"""
-Tests for Jira view classes and factory.
-"""
+"""Tests for Jira view classes and factory."""
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -20,7 +18,7 @@ from integrations.jira.jira_view import (
 
 
 class TestJiraNewConversationView:
-    """Tests for JiraNewConversationView"""
+    """Tests for JiraNewConversationView."""
 
     @pytest.mark.asyncio
     async def test_get_issue_details_success(
@@ -89,14 +87,14 @@ class TestJiraNewConversationView:
     async def test_create_or_update_conversation_no_repo(
         self, new_conversation_view, mock_jinja_env
     ):
-        """Test conversation creation without selected repo"""
+        """Test conversation creation without selected repo."""
         new_conversation_view.selected_repo = None
 
         with pytest.raises(StartingConvoException, match='No repository selected'):
             await new_conversation_view.create_or_update_conversation(mock_jinja_env)
 
     def test_get_response_msg(self, new_conversation_view):
-        """Test get_response_msg method"""
+        """Test get_response_msg method."""
         response = new_conversation_view.get_response_msg()
 
         assert "I'm on it!" in response
@@ -106,7 +104,7 @@ class TestJiraNewConversationView:
 
 
 class TestJiraFactory:
-    """Tests for JiraFactory"""
+    """Tests for JiraFactory."""
 
     @pytest.mark.asyncio
     @patch('integrations.jira.jira_view.JiraFactory._create_provider_handler')
@@ -324,7 +322,7 @@ class TestJiraFactory:
 
 
 class TestJiraPayloadParser:
-    """Tests for JiraPayloadParser"""
+    """Tests for JiraPayloadParser."""
 
     @pytest.fixture
     def parser(self):

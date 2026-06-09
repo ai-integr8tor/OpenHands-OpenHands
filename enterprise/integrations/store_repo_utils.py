@@ -8,14 +8,12 @@ from openhands.app_server.utils.logger import openhands_logger as logger
 
 
 async def store_repositories_in_db(repos: list[Repository], user_id: str) -> None:
-    """
-    Store repositories in DB and create user-repository mappings
+    """Store repositories in DB and create user-repository mappings.
 
     Args:
         repos: List of Repository objects to store
         user_id: User ID associated with these repositories
     """
-
     # Convert Repository objects to StoredRepository objects
     # Convert Repository objects to UserRepositoryMap objects
     stored_repos = []

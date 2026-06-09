@@ -11,11 +11,10 @@ if TYPE_CHECKING:
 
 
 class StripeCustomer(Base):
-    """
-    Represents a stripe customer. We cannot simply use the stripe API for this because:
+    """Represents a stripe customer. We cannot simply use the stripe API for this because:
     "Do not use search in read-after-write flows where strict consistency is necessary.
     Under normal operating conditions, data is searchable in less than a minute.
-    Occasionally, propagation of new or updated data can be up to an hour behind during outages"
+    Occasionally, propagation of new or updated data can be up to an hour behind during outages".
     """
 
     __tablename__ = 'stripe_customers'

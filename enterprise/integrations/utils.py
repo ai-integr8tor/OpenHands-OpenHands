@@ -87,7 +87,10 @@ OPENHANDS_RESOLVER_TEMPLATES_DIR = (
     os.getenv('OPENHANDS_RESOLVER_TEMPLATES_DIR')
     or 'openhands/app_server/integrations/templates/resolver/'
 )
-_jinja_env = Environment(loader=FileSystemLoader(OPENHANDS_RESOLVER_TEMPLATES_DIR))
+_jinja_env = Environment(
+    loader=FileSystemLoader(OPENHANDS_RESOLVER_TEMPLATES_DIR),
+    autoescape=True,
+)
 
 
 def get_oh_labels(web_host: str) -> tuple[str, str]:
@@ -249,14 +252,14 @@ def filter_potential_repos_by_user_msg(
 
 
 def markdown_to_jira_markup(markdown_text: str) -> str:
-    """
-    Convert markdown text to Jira Wiki Markup format.
+    """Convert markdown text to Jira Wiki Markup format.
     This function handles common markdown elements and converts them to their
     Jira Wiki Markup equivalents. It's designed to be exception-safe.
+
     Args:
         markdown_text: The markdown text to convert
     Returns:
-        str: The converted Jira Wiki Markup text
+        str: The converted Jira Wiki Markup text.
     """
     if not markdown_text or not isinstance(markdown_text, str):
         return ''

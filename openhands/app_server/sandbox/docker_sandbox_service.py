@@ -417,7 +417,7 @@ class DockerSandboxService(SandboxService):
         # Prepare port mappings and add port environment variables
         # When using host network, container ports are directly accessible on the host
         # so we use the container ports directly instead of mapping to random host ports
-        port_mappings: dict[int, int] | None = None
+        port_mappings: dict[str, int] | None = None
         if self.use_host_network:
             # Host network mode: container ports are directly accessible
             for exposed_port in self.exposed_ports:
@@ -427,7 +427,7 @@ class DockerSandboxService(SandboxService):
             port_mappings = {}
             for exposed_port in self.exposed_ports:
                 host_port = self._find_unused_port()
-                port_mappings[exposed_port.container_port] = host_port
+                port_mappings[str(exposed_port.container_port)] = host_port
                 env_vars[exposed_port.name] = str(exposed_port.container_port)
 
         # Prepare labels
@@ -477,9 +477,11 @@ class DockerSandboxService(SandboxService):
                 # Allow agent-server containers to resolve host.docker.internal
                 # and other custom hostnames for LAN deployments
                 # Note: extra_hosts is not needed with host network mode
-                extra_hosts=self.extra_hosts
-                if self.extra_hosts and not self.use_host_network
-                else None,
+                extra_hosts=(
+                    self.extra_hosts
+                    if self.extra_hosts and not self.use_host_network
+                    else None
+                ),
                 # Network mode: 'host' for host networking, None for default bridge
                 network_mode=network_mode,
                 # Device passthrough for KVM hardware virtualization

@@ -41,7 +41,8 @@ class GitlabManager(Manager[GitlabViewType]):
         self.token_manager = token_manager
 
         self.jinja_env = Environment(
-            loader=FileSystemLoader(OPENHANDS_RESOLVER_TEMPLATES_DIR + 'gitlab')
+            loader=FileSystemLoader(OPENHANDS_RESOLVER_TEMPLATES_DIR + 'gitlab'),
+            autoescape=True,
         )
 
     def _confirm_incoming_source_type(self, message: Message):
@@ -51,8 +52,7 @@ class GitlabManager(Manager[GitlabViewType]):
     async def _user_has_write_access_to_repo(
         self, project_id: str, user_id: str
     ) -> bool:
-        """
-        Check if the user has write access to the repository (can pull/push changes and open merge requests).
+        """Check if the user has write access to the repository (can pull/push changes and open merge requests).
 
         Args:
             project_id: The ID of the GitLab project
@@ -62,7 +62,6 @@ class GitlabManager(Manager[GitlabViewType]):
         Returns:
             bool: True if the user has write access to the repository, False otherwise
         """
-
         keycloak_user_id = await self.token_manager.get_user_id_from_idp_user_id(
             user_id, ProviderType.GITLAB
         )

@@ -190,8 +190,6 @@ class PendingMessageServiceInjector(
 ):
     """Abstract injector for PendingMessageService."""
 
-    pass
-
 
 class SQLPendingMessageServiceInjector(PendingMessageServiceInjector):
     """SQL-based injector for PendingMessageService."""

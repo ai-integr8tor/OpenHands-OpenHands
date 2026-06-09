@@ -1,5 +1,4 @@
-"""
-Standalone tests for the MaintenanceTaskRunner.
+"""Standalone tests for the MaintenanceTaskRunner.
 
 These tests work without OpenHands dependencies and focus on testing the core
 logic and behavior of the task runner using comprehensive mocking.
@@ -124,7 +123,6 @@ class TestMaintenanceTaskRunnerStandalone:
             async def _process_pending_tasks(self):
                 """Process pending tasks."""
                 # Mock processing
-                pass
 
         runner = MockMaintenanceTaskRunner()
         runner._running = True
@@ -697,8 +695,7 @@ class TestMaintenanceTaskRunnerStandalone:
 
 # Additional integration test scenarios that would work with full dependencies
 class TestMaintenanceTaskRunnerIntegration:
-    """
-    Integration test scenarios for when OpenHands dependencies are available.
+    """Integration test scenarios for when OpenHands dependencies are available.
 
     These tests would require:
     1. OpenHands to be installed and available
@@ -707,8 +704,7 @@ class TestMaintenanceTaskRunnerIntegration:
     """
 
     def test_full_runner_workflow_description(self):
-        """
-        Describe the full workflow test that would be implemented with dependencies.
+        """Describe the full workflow test that would be implemented with dependencies.
 
         This test would:
         1. Create a real MaintenanceTaskRunner instance
@@ -719,11 +715,9 @@ class TestMaintenanceTaskRunnerIntegration:
         6. Verify proper logging and error handling
         7. Test the complete start/stop lifecycle
         """
-        pass
 
     def test_database_integration_description(self):
-        """
-        Describe database integration test that would be implemented.
+        """Describe database integration test that would be implemented.
 
         This test would:
         1. Use the session_maker fixture from conftest.py
@@ -732,11 +726,9 @@ class TestMaintenanceTaskRunnerIntegration:
         4. Verify that only appropriate tasks are selected and processed
         5. Verify database transactions and status updates work correctly
         """
-        pass
 
     def test_processor_integration_description(self):
-        """
-        Describe processor integration test.
+        """Describe processor integration test.
 
         This test would:
         1. Create real processor instances (UserVersionUpgradeProcessor, etc.)
@@ -745,11 +737,9 @@ class TestMaintenanceTaskRunnerIntegration:
         4. Test with both successful and failing processors
         5. Verify result storage and error handling
         """
-        pass
 
     def test_performance_and_scalability_description(self):
-        """
-        Describe performance test scenarios.
+        """Describe performance test scenarios.
 
         This test would:
         1. Create a large number of pending tasks
@@ -758,4 +748,3 @@ class TestMaintenanceTaskRunnerIntegration:
         4. Test memory usage and cleanup
         5. Verify proper handling of long-running processors
         """
-        pass

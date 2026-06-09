@@ -177,9 +177,11 @@ async def _track_conversation_terminal(
         prompt_tokens=prompt_tokens,
         completion_tokens=completion_tokens,
         llm_model=app_conversation_info.llm_model,
-        trigger=app_conversation_info.trigger.value
-        if app_conversation_info.trigger
-        else None,
+        trigger=(
+            app_conversation_info.trigger.value
+            if app_conversation_info.trigger
+            else None
+        ),
     )
 
 
@@ -406,7 +408,7 @@ async def on_conversation_update(
 
 
 @router.post('/events/{conversation_id}')
-async def on_event(
+async def on_event(  # noqa: ambiguity-mine
     events: list[Event],
     conversation_id: UUID,
     app_conversation_info: AppConversationInfo = Depends(valid_conversation),

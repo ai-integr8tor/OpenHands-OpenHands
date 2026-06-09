@@ -10,9 +10,7 @@ from storage.slack_team import SlackTeam
 @dataclass
 class SlackTeamStore:
     async def get_team_bot_token(self, team_id: str) -> str | None:
-        """
-        Get a team's bot access token by team_id
-        """
+        """Get a team's bot access token by team_id."""
         async with a_session_maker() as session:
             result = await session.execute(
                 select(SlackTeam).where(SlackTeam.team_id == team_id)
@@ -25,9 +23,7 @@ class SlackTeamStore:
         team_id: str,
         bot_access_token: str,
     ) -> SlackTeam:
-        """
-        Create a new SlackTeam
-        """
+        """Create a new SlackTeam."""
         slack_team = SlackTeam(team_id=team_id, bot_access_token=bot_access_token)
         async with a_session_maker() as session:
             await session.execute(delete(SlackTeam).where(SlackTeam.team_id == team_id))

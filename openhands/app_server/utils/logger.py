@@ -40,14 +40,14 @@ if DEBUG_LLM:
     )
     if confirmation.lower() == 'y':
         litellm.suppress_debug_info = False
-        litellm.set_verbose = True
+        litellm.set_verbose = True  # type: ignore[reportPrivateImportUsage]
     else:
         print('DEBUG_LLM disabled due to lack of confirmation')
         litellm.suppress_debug_info = True
-        litellm.set_verbose = False
+        litellm.set_verbose = False  # type: ignore[reportPrivateImportUsage]
 else:
     litellm.suppress_debug_info = True
-    litellm.set_verbose = False
+    litellm.set_verbose = False  # type: ignore[reportPrivateImportUsage]
 
 if DEBUG:
     LOG_LEVEL = 'DEBUG'
@@ -523,13 +523,13 @@ llm_response_logger = _setup_llm_logger('response', current_log_level)
 
 
 class OpenHandsLoggerAdapter(logging.LoggerAdapter):
-    extra: dict
+    extra: dict  # type: ignore[reportIncompatibleVariableOverride]
 
     def __init__(
         self, logger: logging.Logger = openhands_logger, extra: dict | None = None
     ) -> None:
         self.logger = logger
-        self.extra = extra or {}
+        self.extra = extra or {}  # type: ignore[reportIncompatibleVariableOverride]
 
     def process(
         self, msg: str, kwargs: MutableMapping[str, Any]
@@ -559,9 +559,11 @@ class RedactURLParamsFilter(logging.Filter):
         if record.args:
             if isinstance(record.args, (tuple, list)):
                 record.args = tuple(
-                    redact_url_params(arg)
-                    if isinstance(arg, str) and '?' in arg
-                    else arg
+                    (
+                        redact_url_params(arg)
+                        if isinstance(arg, str) and '?' in arg
+                        else arg
+                    )
                     for arg in record.args
                 )
             elif isinstance(record.args, dict):

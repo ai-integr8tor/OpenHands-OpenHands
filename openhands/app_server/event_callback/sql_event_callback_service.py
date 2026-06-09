@@ -251,7 +251,6 @@ class SQLEventCallbackService(EventCallbackService):
 
     async def __aexit__(self, exc_type, exc_value, traceback):
         """Stop using this event callback service."""
-        pass
 
 
 class SQLEventCallbackServiceInjector(EventCallbackServiceInjector):

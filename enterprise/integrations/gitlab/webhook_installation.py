@@ -35,8 +35,6 @@ SCOPES: list[str] = [
 class BreakLoopException(Exception):
     """Exception raised when webhook installation conditions are not met or rate limited."""
 
-    pass
-
 
 async def verify_webhook_conditions(
     gitlab_service: SaaSGitLabService,
@@ -45,8 +43,7 @@ async def verify_webhook_conditions(
     webhook_store: GitlabWebhookStore,
     webhook: GitlabWebhook,
 ) -> None:
-    """
-    Verify all conditions are met for webhook installation.
+    """Verify all conditions are met for webhook installation.
     Raises BreakLoopException if any condition fails or rate limited.
 
     Args:
@@ -139,8 +136,7 @@ async def install_webhook_on_resource(
     webhook_store: GitlabWebhookStore,
     webhook: GitlabWebhook,
 ) -> tuple[str | None, WebhookStatus | None]:
-    """
-    Install webhook on a GitLab resource.
+    """Install webhook on a GitLab resource.
 
     Args:
         gitlab_service: GitLab service instance

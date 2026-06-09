@@ -82,7 +82,7 @@ class SlackNewConversationView(SlackViewInterface):
         return ''
 
     async def _get_instructions(self, jinja_env: Environment) -> tuple[str, str]:
-        """Instructions passed when conversation is first initialized"""
+        """Instructions passed when conversation is first initialized."""
         user_info: SlackUser = self.slack_to_openhands_user
 
         messages = []
@@ -190,7 +190,7 @@ class SlackNewConversationView(SlackViewInterface):
         )
 
     async def create_or_update_conversation(self, jinja: Environment) -> str:
-        """Only creates a new conversation"""
+        """Only creates a new conversation."""
         self._verify_necessary_values_are_set()
 
         provider_tokens = await self.saas_user_auth.get_provider_tokens()

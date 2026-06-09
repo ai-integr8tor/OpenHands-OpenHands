@@ -17,7 +17,7 @@ FROZEN_TIMESTAMP_NO_TZ = '2024-01-15T10:30:00'
 
 @pytest.fixture
 def log_output():
-    """Fixture to capture log output"""
+    """Fixture to capture log output."""
     string_io = StringIO()
     logger = logging.Logger('test')
     setup_json_logger(logger, 'INFO', _out=string_io)

@@ -16,8 +16,7 @@ from openhands.app_server.utils.import_utils import get_impl
 
 
 class MaintenanceTaskProcessor(BaseModel, ABC):
-    """
-    Abstract base class for maintenance task processors.
+    """Abstract base class for maintenance task processors.
 
     Maintenance processors are invoked to perform background maintenance
     tasks such as upgrading user settings, cleaning up data, etc.
@@ -32,8 +31,7 @@ class MaintenanceTaskProcessor(BaseModel, ABC):
 
     @abstractmethod
     async def __call__(self, task: MaintenanceTask) -> dict:
-        """
-        Process a maintenance task.
+        """Process a maintenance task.
 
         Args:
             task: The maintenance task to process
@@ -54,9 +52,7 @@ class MaintenanceTaskStatus(Enum):
 
 
 class MaintenanceTask(Base):
-    """
-    Model for storing maintenance tasks that perform background operations.
-    """
+    """Model for storing maintenance tasks that perform background operations."""
 
     __tablename__ = 'maintenance_tasks'
 
@@ -82,8 +78,7 @@ class MaintenanceTask(Base):
     )
 
     def get_processor(self) -> MaintenanceTaskProcessor:
-        """
-        Get the processor instance from the stored processor type and JSON data.
+        """Get the processor instance from the stored processor type and JSON data.
 
         Returns:
             MaintenanceTaskProcessor: The processor instance
@@ -96,8 +91,7 @@ class MaintenanceTask(Base):
         return processor
 
     def set_processor(self, processor: MaintenanceTaskProcessor) -> None:
-        """
-        Set the processor instance, storing its type and JSON representation.
+        """Set the processor instance, storing its type and JSON representation.
 
         Args:
             processor: The MaintenanceTaskProcessor instance to store

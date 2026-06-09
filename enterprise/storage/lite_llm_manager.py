@@ -1,6 +1,4 @@
-"""
-Store class for managing organizational settings.
-"""
+"""Store class for managing organizational settings."""
 
 import functools
 import os
@@ -406,9 +404,9 @@ class LiteLlmManager:
                             extra={
                                 'org_id': org_id,
                                 'user_id': keycloak_user_id,
-                                'key_prefix': db_key[:10] + '...'
-                                if len(db_key) > 10
-                                else db_key,
+                                'key_prefix': (
+                                    db_key[:10] + '...' if len(db_key) > 10 else db_key
+                                ),
                             },
                         )
                         # Generate a new key for the user
@@ -1557,8 +1555,7 @@ class LiteLlmManager:
         client: httpx.AsyncClient,
         team_id: str,
     ) -> dict:
-        """
-        Get financial data for all members in a team.
+        """Get financial data for all members in a team.
 
         Fetches team info from LiteLLM and extracts spending/budget data for each member.
 

@@ -1,6 +1,4 @@
-"""
-SQLAlchemy model for Git Organization Claims.
-"""
+"""SQLAlchemy model for Git Organization Claims."""
 
 from datetime import datetime
 from typing import TYPE_CHECKING

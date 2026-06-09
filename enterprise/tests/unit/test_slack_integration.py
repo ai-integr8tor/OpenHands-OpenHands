@@ -248,7 +248,6 @@ class TestRepoVerificationHandling:
         slack_new_conversation_view,
     ):
         """Test that when repo is successfully verified, job starts without selector."""
-
         # Setup Redis mock
         mock_redis = AsyncMock()
         mock_get_redis_client_async.return_value = mock_redis
@@ -291,7 +290,6 @@ class TestBuildRepoOptions:
 
     def test_build_options_with_repos(self, slack_manager):
         """Test building options from a list of repositories."""
-
         repos = [
             Repository(
                 id='1',
@@ -326,7 +324,6 @@ class TestBuildRepoOptions:
 
     def test_build_options_truncates_long_names(self, slack_manager):
         """Test that repo names longer than 75 chars are truncated."""
-
         long_name = 'a' * 100
         repos = [
             Repository(
@@ -355,7 +352,6 @@ class TestSearchRepositories:
         self, mock_provider_handler_class, slack_manager, mock_user_auth
     ):
         """Test that _search_repositories returns repositories from the provider."""
-
         # Setup: Create real Repository objects
         expected_repos = [
             Repository(
@@ -434,7 +430,6 @@ class TestSearchRepositories:
 
         This exercises the full code path from search → filter → options building.
         """
-
         # Setup: Create a realistic repository list
         repos = [
             Repository(

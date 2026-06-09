@@ -1,6 +1,4 @@
-"""
-SQLAlchemy model for User.
-"""
+"""SQLAlchemy model for User."""
 
 from datetime import datetime
 from typing import TYPE_CHECKING, Any

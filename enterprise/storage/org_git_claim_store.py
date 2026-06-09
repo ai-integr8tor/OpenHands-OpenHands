@@ -1,6 +1,4 @@
-"""
-Store class for managing Git organization claims.
-"""
+"""Store class for managing Git organization claims."""
 
 from datetime import datetime, timezone
 from typing import Optional

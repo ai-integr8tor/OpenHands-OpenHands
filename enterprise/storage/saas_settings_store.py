@@ -86,8 +86,7 @@ class SaasSettingsStore(SettingsStore):
     async def _get_user_settings_by_keycloak_id_async(
         self, keycloak_user_id: str, session=None
     ) -> UserSettings | None:
-        """
-        Get UserSettings by keycloak_user_id (async version).
+        """Get UserSettings by keycloak_user_id (async version).
 
         Args:
             keycloak_user_id: The keycloak user ID to search for
@@ -483,7 +482,6 @@ class SaasSettingsStore(SettingsStore):
         First checks if an existing key exists for the user and verifies it
         is valid in LiteLLM. If valid, reuses it. Otherwise, generates a new key.
         """
-
         llm_api_key = item.agent_settings.llm.api_key
 
         # First, check if our current key is valid

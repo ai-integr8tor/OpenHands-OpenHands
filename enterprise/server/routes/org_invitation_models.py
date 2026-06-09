@@ -1,6 +1,4 @@
-"""
-Pydantic models and custom exceptions for organization invitations.
-"""
+"""Pydantic models and custom exceptions for organization invitations."""
 
 from pydantic import BaseModel, EmailStr
 from storage.org_invitation import OrgInvitation
@@ -9,8 +7,6 @@ from storage.role_store import RoleStore
 
 class InvitationError(Exception):
     """Base exception for invitation errors."""
-
-    pass
 
 
 class InvitationAlreadyExistsError(InvitationError):

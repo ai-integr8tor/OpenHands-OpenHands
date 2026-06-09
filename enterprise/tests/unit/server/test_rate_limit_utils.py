@@ -273,7 +273,8 @@ async def test_rate_limit_different_users_have_separate_limits(
 
 class TestRateLimitEnvConfiguration:
     """Rate limit windows are read from environment variables at import time,
-    with a default value for each when the variable is unset."""
+    with a default value for each when the variable is unset.
+    """
 
     @pytest.mark.parametrize(
         'const_name,expected_default',

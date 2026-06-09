@@ -720,7 +720,8 @@ async def test_store_and_load_mcp_config_via_agent_settings(
     async_session_maker, org_with_multiple_members_fixture
 ):
     """mcp_config is persisted inside agent_settings / agent_settings_diff and
-    round-trips correctly through store → load."""
+    round-trips correctly through store → load.
+    """
     fixture = org_with_multiple_members_fixture
     admin_user_id = str(fixture['admin_user_id'])
 
@@ -824,7 +825,8 @@ async def test_store_and_load_llm_profiles_round_trip(
 ):
     """Saved llm_profiles must persist on the User row and round-trip through
     store → load. Without the user.llm_profiles column they are silently
-    dropped on store and always default to empty on load."""
+    dropped on store and always default to empty on load.
+    """
     from openhands.sdk.llm import LLM
 
     fixture = org_with_multiple_members_fixture
@@ -1011,7 +1013,8 @@ async def test_llm_profiles_are_encrypted_at_rest(
     """The raw value in the user.llm_profiles column must be ciphertext, not
     a JSON dict — profile api_keys would otherwise leak in DB dumps,
     replicas, and backups. Mirrors the encryption invariant org and
-    org_member already enforce on _llm_api_key."""
+    org_member already enforce on _llm_api_key.
+    """
     from sqlalchemy import select, text
     from storage.user import User
 

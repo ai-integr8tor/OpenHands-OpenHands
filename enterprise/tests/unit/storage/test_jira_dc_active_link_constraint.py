@@ -89,13 +89,11 @@ def test_active_link_migration_deduplicates_and_enforces_one_active_link_per_use
             migration.upgrade()
 
         rows = connection.execute(
-            sa.text(
-                """
+            sa.text("""
                 SELECT id, keycloak_user_id, status
                 FROM jira_dc_users
                 ORDER BY id
-                """
-            )
+                """)
         ).all()
         assert rows == [
             (1, 'user-1', 'inactive'),

@@ -97,7 +97,8 @@ class SuggestedTask(BaseModel):
         env = Environment(
             loader=FileSystemLoader(
                 'openhands/app_server/integrations/templates/suggested_task'
-            )
+            ),
+            autoescape=True,
         )
 
         template = None
@@ -171,31 +172,21 @@ class Comment(BaseModel):
 class AuthenticationError(ValueError):
     """Raised when there is an issue with GitHub authentication."""
 
-    pass
-
 
 class UnknownException(ValueError):
     """Raised when there is an issue with GitHub communication."""
-
-    pass
 
 
 class RateLimitError(ValueError):
     """Raised when the git provider's API rate limits are exceeded."""
 
-    pass
-
 
 class ProviderTimeoutError(ValueError):
     """Raised when a request to a git provider times out."""
 
-    pass
-
 
 class ResourceNotFoundError(ValueError):
     """Raised when a requested resource (file, directory, etc.) is not found."""
-
-    pass
 
 
 class RequestMethod(Enum):
@@ -294,19 +285,23 @@ class GitService(Protocol):
         self, repository: str
     ) -> Repository:
         """Gets all repository details from repository name"""
+        ...
 
     async def get_branches(self, repository: str) -> list[Branch]:
         """Get branches for a repository"""
+        ...
 
     async def get_paginated_branches(
         self, repository: str, page: int = 1, per_page: int = 30
     ) -> PaginatedBranchesResponse:
         """Get branches for a repository with pagination"""
+        ...
 
     async def search_branches(
         self, repository: str, query: str, per_page: int = 30
     ) -> list[Branch]:
         """Search for branches within a repository"""
+        ...
 
     async def get_pr_details(self, repository: str, pr_number: int) -> dict:
         """Get detailed information about a specific pull request/merge request

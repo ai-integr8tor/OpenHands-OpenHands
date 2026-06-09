@@ -127,8 +127,7 @@ redis_client = get_redis_client()
 
 
 async def verify_jira_signature(body: bytes, signature: str, payload: dict):
-    """
-    Verify Jira webhook signature.
+    """Verify Jira webhook signature.
 
     Args:
         body: Raw request body bytes
@@ -141,7 +140,6 @@ async def verify_jira_signature(body: bytes, signature: str, payload: dict):
     Returns:
         None (raises exception on failure)
     """
-
     if not signature:
         raise HTTPException(
             status_code=403, detail='x-hub-signature header is missing!'
@@ -188,7 +186,7 @@ async def verify_jira_signature(body: bytes, signature: str, payload: dict):
         raise HTTPException(status_code=403, detail="Request signatures didn't match!")
 
 
-async def _handle_workspace_link_creation(
+async def _handle_workspace_link_creation(  # noqa: ambiguity-mine
     user_id: str, jira_user_id: str, target_workspace: str
 ):
     """Handle the creation or reactivation of a workspace link for a user."""
@@ -247,7 +245,9 @@ async def _handle_workspace_link_creation(
         )
 
 
-async def _validate_workspace_update_permissions(user_id: str, target_workspace: str):
+async def _validate_workspace_update_permissions(  # noqa: ambiguity-mine
+    user_id: str, target_workspace: str
+):
     """Validate that user can update the target workspace."""
     workspace = await jira_manager.integration_store.get_workspace_by_name(
         target_workspace
@@ -399,7 +399,9 @@ async def create_jira_workspace(request: Request, workspace_data: JiraWorkspaceC
 
 
 @jira_integration_router.post('/workspaces/link')
-async def create_workspace_link(request: Request, link_data: JiraLinkCreate):
+async def create_workspace_link(  # noqa: ambiguity-mine
+    request: Request, link_data: JiraLinkCreate
+):
     """Register a user mapping to a Jira workspace."""
     try:
         user_auth = cast(SaasUserAuth, await get_user_auth(request))
@@ -480,7 +482,7 @@ async def jira_callback(request: Request, code: str, state: str):
         'code': code,
         'redirect_uri': JIRA_REDIRECT_URI,
     }
-    response = requests.post(JIRA_TOKEN_URL, json=token_payload)
+    response = requests.post(JIRA_TOKEN_URL, json=token_payload, timeout=10)
     if response.status_code != 200:
         raise HTTPException(
             status_code=400, detail=f'Error fetching token: {response.text}'
@@ -490,7 +492,7 @@ async def jira_callback(request: Request, code: str, state: str):
     access_token = token_data['access_token']
 
     headers = {'Authorization': f'Bearer {access_token}'}
-    response = requests.get(JIRA_RESOURCES_URL, headers=headers)
+    response = requests.get(JIRA_RESOURCES_URL, headers=headers, timeout=10)
 
     if response.status_code != 200:
         raise HTTPException(
@@ -520,7 +522,7 @@ async def jira_callback(request: Request, code: str, state: str):
 
     jira_cloud_id = target_workspace_data.get('id', '')
 
-    jira_user_response = requests.get(JIRA_USER_INFO_URL, headers=headers)
+    jira_user_response = requests.get(JIRA_USER_INFO_URL, headers=headers, timeout=10)
     if jira_user_response.status_code != 200:
         raise HTTPException(
             status_code=400,
@@ -600,7 +602,7 @@ async def jira_callback(request: Request, code: str, state: str):
     '/workspaces/link',
     response_model=JiraUserResponse,
 )
-async def get_current_workspace_link(request: Request):
+async def get_current_workspace_link(request: Request):  # noqa: ambiguity-mine
     """Get current user's Jira integration details."""
     try:
         user_auth = cast(SaasUserAuth, await get_user_auth(request))
@@ -659,7 +661,7 @@ async def get_current_workspace_link(request: Request):
 
 
 @jira_integration_router.post('/workspaces/unlink')
-async def unlink_workspace(request: Request):
+async def unlink_workspace(request: Request):  # noqa: ambiguity-mine
     """Unlink user from Jira integration by setting status to inactive."""
     try:
         user_auth = cast(SaasUserAuth, await get_user_auth(request))
@@ -714,7 +716,9 @@ async def unlink_workspace(request: Request):
     '/workspaces/validate/{workspace_name}',
     response_model=JiraValidateWorkspaceResponse,
 )
-async def validate_workspace_integration(request: Request, workspace_name: str):
+async def validate_workspace_integration(  # noqa: ambiguity-mine
+    request: Request, workspace_name: str
+):
     """Validate if the user's organization has an active Jira integration."""
     try:
         # Validate workspace_name format

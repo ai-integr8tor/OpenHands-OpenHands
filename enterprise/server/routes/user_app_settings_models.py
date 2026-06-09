@@ -1,6 +1,4 @@
-"""
-Pydantic models for user app settings API.
-"""
+"""Pydantic models for user app settings API."""
 
 from pydantic import BaseModel, EmailStr
 from storage.user import User
@@ -8,8 +6,6 @@ from storage.user import User
 
 class UserAppSettingsError(Exception):
     """Base exception for user app settings errors."""
-
-    pass
 
 
 class UserNotFoundError(UserAppSettingsError):
@@ -22,8 +18,6 @@ class UserNotFoundError(UserAppSettingsError):
 
 class UserAppSettingsUpdateError(UserAppSettingsError):
     """Raised when user app settings update fails."""
-
-    pass
 
 
 class UserAppSettingsResponse(BaseModel):

@@ -242,7 +242,6 @@ async def test_get_provider_tokens(mock_token_manager):
         access_token, idp=ProviderType.GITHUB
     )
     """
-    pass
 
 
 class TestGetProviderTokensBitbucketDCHost:
@@ -275,7 +274,7 @@ class TestGetProviderTokensBitbucketDCHost:
 
     @pytest.mark.asyncio
     async def test_host_derived_from_token_url(self):
-        """host is populated from BITBUCKET_DATA_CENTER_HOST when user secrets lack it."""
+        """Host is populated from BITBUCKET_DATA_CENTER_HOST when user secrets lack it."""
         with (
             patch('server.auth.saas_user_auth.token_manager') as mock_tm,
             patch('server.auth.saas_user_auth.a_session_maker') as mock_session_maker,
@@ -329,7 +328,7 @@ class TestGetProviderTokensBitbucketDCHost:
 
     @pytest.mark.asyncio
     async def test_host_remains_none_when_host_empty(self):
-        """host stays None when BITBUCKET_DATA_CENTER_HOST is empty."""
+        """Host stays None when BITBUCKET_DATA_CENTER_HOST is empty."""
         with (
             patch('server.auth.saas_user_auth.token_manager') as mock_tm,
             patch('server.auth.saas_user_auth.a_session_maker') as mock_session_maker,

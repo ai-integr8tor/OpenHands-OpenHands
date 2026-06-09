@@ -29,8 +29,6 @@ from openhands.sdk.settings import (
 class OrgCreationError(Exception):
     """Base exception for organization creation errors."""
 
-    pass
-
 
 class OrgNameExistsError(OrgCreationError):
     """Raised when an organization name already exists."""
@@ -43,19 +41,13 @@ class OrgNameExistsError(OrgCreationError):
 class LiteLLMIntegrationError(OrgCreationError):
     """Raised when LiteLLM integration fails."""
 
-    pass
-
 
 class OrgDatabaseError(OrgCreationError):
     """Raised when database operations fail."""
 
-    pass
-
 
 class OrgDeletionError(Exception):
     """Base exception for organization deletion errors."""
-
-    pass
 
 
 class OrgAuthorizationError(OrgDeletionError):
@@ -197,9 +189,11 @@ class OrgResponse(BaseModel):
             conversation_expiration=org.conversation_expiration,
             remote_runtime_resource_factor=org.remote_runtime_resource_factor,
             billing_margin=org.billing_margin,
-            enable_proactive_conversation_starters=org.enable_proactive_conversation_starters
-            if org.enable_proactive_conversation_starters is not None
-            else True,
+            enable_proactive_conversation_starters=(
+                org.enable_proactive_conversation_starters
+                if org.enable_proactive_conversation_starters is not None
+                else True
+            ),
             sandbox_base_container_image=org.sandbox_base_container_image,
             sandbox_runtime_container_image=org.sandbox_runtime_container_image,
             org_version=org.org_version if org.org_version is not None else 0,
@@ -577,9 +571,11 @@ class OrgAppSettingsResponse(BaseModel):
             OrgAppSettingsResponse with app settings
         """
         return cls(
-            enable_proactive_conversation_starters=org.enable_proactive_conversation_starters
-            if org.enable_proactive_conversation_starters is not None
-            else True,
+            enable_proactive_conversation_starters=(
+                org.enable_proactive_conversation_starters
+                if org.enable_proactive_conversation_starters is not None
+                else True
+            ),
             max_budget_per_task=org.max_budget_per_task,
         )
 

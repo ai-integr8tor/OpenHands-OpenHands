@@ -5,9 +5,11 @@ from pydantic import BaseModel
 with warnings.catch_warnings():
     warnings.simplefilter('ignore')
     import litellm
-    from litellm import LlmProviders, ProviderConfigManager, get_llm_provider
-
-from openhands.app_server.utils.logger import openhands_logger as logger
+    from litellm import (
+        LlmProviders,  # type: ignore[reportPrivateImportUsage]
+        ProviderConfigManager,
+        get_llm_provider,
+    )
 
 # ---------------------------------------------------------------------------
 # The ``openhands-sdk`` package is the **single source of truth** for which
@@ -17,6 +19,7 @@ from openhands.app_server.utils.logger import openhands_logger as logger
 # ``VERIFIED_OPENHANDS_MODELS``.  SaaS mode overrides it with the database
 # (via ``get_openhands_models``).
 # ---------------------------------------------------------------------------
+from openhands.app_server.utils.logger import openhands_logger as logger
 from openhands.sdk.llm.utils.verified_models import (  # noqa: E402
     VERIFIED_ANTHROPIC_MODELS as _SDK_ANTHROPIC,
 )

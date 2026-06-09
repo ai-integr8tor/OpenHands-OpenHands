@@ -7,9 +7,7 @@ from storage.base import Base
 
 
 class OpenhandsPR(Base):
-    """
-    Represents a pull request created by OpenHands.
-    """
+    """Represents a pull request created by OpenHands."""
 
     __tablename__ = 'openhands_prs'
 

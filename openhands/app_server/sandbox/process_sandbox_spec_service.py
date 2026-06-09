@@ -18,7 +18,7 @@ from openhands.app_server.sandbox.sandbox_spec_service import (
 from openhands.app_server.services.injector import InjectorState
 
 
-def get_default_sandbox_specs():
+def get_default_sandbox_specs():  # noqa: ambiguity-mine
     return [
         SandboxSpecInfo(
             id=get_agent_server_image(),
@@ -26,7 +26,7 @@ def get_default_sandbox_specs():
             initial_env={
                 # Keep tmux sockets on a short path; macOS default temp dirs can
                 # exceed Unix socket path limits once libtmux appends tmux-UID.
-                'TMUX_TMPDIR': '/tmp/openhands-tmux',
+                'TMUX_TMPDIR': '/tmp/openhands-tmux',  # nosec B108
                 # VSCode disabled for now
                 'OH_ENABLE_VS_CODE': '0',
                 **get_agent_server_env(),

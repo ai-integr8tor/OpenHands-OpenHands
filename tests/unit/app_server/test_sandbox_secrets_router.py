@@ -515,9 +515,7 @@ def _build_integration_test_app(
     env var) are overridden to no-ops so we can exercise the endpoint-level auth logic
     in isolation.
     """
-    from openhands.app_server.sandbox.sandbox_router import (
-        router as sandbox_router,
-    )
+    from openhands.app_server.sandbox.sandbox_router import router as sandbox_router
     from openhands.app_server.user.user_router import router as user_router
     from openhands.app_server.utils.dependencies import check_session_api_key
 

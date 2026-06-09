@@ -45,9 +45,7 @@ class VerifyWebhookStatus:
         webhook_store: GitlabWebhookStore,
         webhook: GitlabWebhook,
     ):
-        """
-        Check whether webhook already exists on resource
-        """
+        """Check whether webhook already exists on resource."""
         (
             does_webhook_exist_on_resource,
             status,
@@ -101,9 +99,7 @@ class VerifyWebhookStatus:
         webhook_store: GitlabWebhookStore,
         webhook: GitlabWebhook,
     ):
-        """
-        Install webhook on resource
-        """
+        """Install webhook on resource."""
         # Use the standalone function
         await install_webhook_on_resource(
             gitlab_service=gitlab_service,
@@ -114,9 +110,8 @@ class VerifyWebhookStatus:
         )
 
     async def install_webhooks(self):
-        """
-        Periodically check the conditions for installing a webhook on resource as valid
-        Rows with valid conditions with contain (webhook_exists=False, status=WebhookStatus.VERIFIED)
+        """Periodically check the conditions for installing a webhook on resource as valid
+        Rows with valid conditions with contain (webhook_exists=False, status=WebhookStatus.VERIFIED).
 
         Conditions we check for
             1. Resource exists
@@ -128,7 +123,6 @@ class VerifyWebhookStatus:
                 - resource was never setup with webhook
 
         """
-
         from integrations.gitlab.gitlab_service import SaaSGitLabService
 
         # Check if the table exists before proceeding

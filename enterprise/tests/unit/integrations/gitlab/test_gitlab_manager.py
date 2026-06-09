@@ -1,5 +1,4 @@
-"""
-Tests for GitlabManager job creation flow.
+"""Tests for GitlabManager job creation flow.
 
 All conversations now use V1 app conversation system.
 """

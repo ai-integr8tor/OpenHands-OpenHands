@@ -21,7 +21,7 @@ class SaaSGitHubService(GitHubService):
         base_domain: str | None = None,
     ):
         logger.debug(
-            f'SaaSGitHubService created with user_id {user_id}, external_auth_id {external_auth_id}, external_auth_token {'set' if external_auth_token else 'None'}, github_token {'set' if token else 'None'}, external_token_manager {external_token_manager}'
+            f'SaaSGitHubService created with user_id {user_id}, external_auth_id {external_auth_id}, external_auth_token {"set" if external_auth_token else "None"}, github_token {"set" if token else "None"}, external_token_manager {external_token_manager}'
         )
         super().__init__(
             user_id=user_id,
@@ -105,8 +105,7 @@ class SaaSGitHubService(GitHubService):
         }
 
     async def get_repository_node_id(self, repo_id: str) -> str:
-        """
-        Get the new GitHub GraphQL node ID for a repository using REST API.
+        """Get the new GitHub GraphQL node ID for a repository using REST API.
 
         Args:
             repo_id: Numeric repository ID as string (e.g., "123456789")

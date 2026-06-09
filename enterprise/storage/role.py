@@ -1,6 +1,4 @@
-"""
-SQLAlchemy model for Role.
-"""
+"""SQLAlchemy model for Role."""
 
 from typing import TYPE_CHECKING
 

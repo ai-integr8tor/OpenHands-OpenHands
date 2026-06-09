@@ -80,5 +80,3 @@ class UserContext(ABC):
 
 class UserContextInjector(DiscriminatedUnionMixin, Injector[UserContext], ABC):
     """Injector for user contexts."""
-
-    pass

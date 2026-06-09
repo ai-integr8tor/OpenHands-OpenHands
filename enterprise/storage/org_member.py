@@ -1,6 +1,4 @@
-"""
-SQLAlchemy model for Organization-Member relationship.
-"""
+"""SQLAlchemy model for Organization-Member relationship."""
 
 from typing import TYPE_CHECKING, Any
 from uuid import UUID

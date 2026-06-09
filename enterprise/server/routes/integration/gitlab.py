@@ -205,7 +205,7 @@ async def get_gitlab_resources(
 
         # Add projects with their webhook status
         for project, (project_id, webhook_exists) in zip(
-            filtered_projects, project_results
+            filtered_projects, project_results, strict=False
         ):
             webhook = project_webhook_map.get(project_id)
 
@@ -226,7 +226,9 @@ async def get_gitlab_resources(
             )
 
         # Add groups with their webhook status
-        for group, (group_id, webhook_exists) in zip(groups, group_results):
+        for group, (group_id, webhook_exists) in zip(
+            groups, group_results, strict=False
+        ):
             webhook = group_webhook_map.get(group_id)
 
             resources.append(
@@ -318,12 +320,12 @@ async def reinstall_gitlab_webhook(
             # Create new webhook record
             webhook = GitlabWebhook(
                 user_id=user_id,  # Track who created it
-                project_id=resource_id
-                if resource_type == GitLabResourceType.PROJECT
-                else None,
-                group_id=resource_id
-                if resource_type == GitLabResourceType.GROUP
-                else None,
+                project_id=(
+                    resource_id if resource_type == GitLabResourceType.PROJECT else None
+                ),
+                group_id=(
+                    resource_id if resource_type == GitLabResourceType.GROUP else None
+                ),
                 webhook_exists=False,
             )
             await webhook_store.store_webhooks([webhook])

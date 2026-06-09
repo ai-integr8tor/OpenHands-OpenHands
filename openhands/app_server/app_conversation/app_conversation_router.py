@@ -84,6 +84,10 @@ from openhands.app_server.utils.dependencies import get_dependencies
 from openhands.app_server.utils.docker_utils import (
     replace_localhost_hostname_for_docker,
 )
+from openhands.app_server.utils.paging_utils import (
+    PAGE_ID_QUERY_TITLE,
+    PAGE_LIMIT_QUERY_TITLE,
+)
 from openhands.sdk.skills import KeywordTrigger, TaskTrigger
 from openhands.sdk.workspace.remote.async_remote_workspace import AsyncRemoteWorkspace
 
@@ -243,12 +247,12 @@ async def search_app_conversations(
     ] = None,
     page_id: Annotated[
         str | None,
-        Query(title='Optional next_page_id from the previously returned page'),
+        Query(title=PAGE_ID_QUERY_TITLE),
     ] = None,
     limit: Annotated[
         int,
         Query(
-            title='The max number of results in the page',
+            title=PAGE_LIMIT_QUERY_TITLE,
             gt=0,
             le=100,
         ),
@@ -385,12 +389,16 @@ async def start_app_conversation(
                     ctx = await resolve_analytics_context(user_id)
                     analytics.track_conversation_created(
                         ctx=ctx,
-                        conversation_id=str(result.app_conversation_id)
-                        if result.app_conversation_id
-                        else result.id,
-                        trigger=start_request.trigger.value
-                        if start_request.trigger
-                        else None,
+                        conversation_id=(
+                            str(result.app_conversation_id)
+                            if result.app_conversation_id
+                            else str(result.id)
+                        ),
+                        trigger=(
+                            start_request.trigger.value
+                            if start_request.trigger
+                            else None
+                        ),
                         llm_model=None,  # Not available at start time
                         agent_type='default',
                         has_repository=start_request.selected_repository is not None,
@@ -663,6 +671,7 @@ async def switch_conversation_profile(
     )
     content_hash = hashlib.sha1(
         json.dumps(fingerprint, sort_keys=True, default=str).encode('utf-8'),
+        usedforsecurity=False,
     ).hexdigest()[:12]
     profile_llm = profile_llm.model_copy(
         update={'usage_id': f'profile:{request.profile_name}:{content_hash}'},
@@ -869,7 +878,7 @@ async def delete_app_conversation(
 async def stream_app_conversation_start(
     request: AppConversationStartRequest,
     user_context: UserContext = user_context_dependency,
-) -> list[AppConversationStartTask]:
+) -> StreamingResponse:
     """Start an app conversation start task and stream updates from it.
     Leaves the connection open until either the conversation starts or there was an error
     """
@@ -896,12 +905,12 @@ async def search_app_conversation_start_tasks(
     ] = AppConversationStartTaskSortOrder.CREATED_AT_DESC,
     page_id: Annotated[
         str | None,
-        Query(title='Optional next_page_id from the previously returned page'),
+        Query(title=PAGE_ID_QUERY_TITLE),
     ] = None,
     limit: Annotated[
         int,
         Query(
-            title='The max number of results in the page',
+            title=PAGE_LIMIT_QUERY_TITLE,
             gt=0,
             le=100,
         ),
@@ -1395,9 +1404,11 @@ async def get_conversation_hooks(
                     for matcher in matchers:
                         hook_defs = [
                             HookDefinitionResponse(
-                                type=hook.type.value
-                                if hasattr(hook.type, 'value')
-                                else str(hook.type),
+                                type=(
+                                    hook.type.value
+                                    if hasattr(hook.type, 'value')
+                                    else str(hook.type)
+                                ),
                                 command=hook.command,
                                 timeout=hook.timeout,
                                 async_=hook.async_,
@@ -1468,9 +1479,12 @@ async def export_conversation(
                 user_info = await user_context.get_user_info()
                 ctx = AnalyticsContext(
                     user_id=user_id,
-                    consented=user_info.user_consents_to_analytics
-                    if user_info and user_info.user_consents_to_analytics is not None
-                    else False,
+                    consented=(
+                        user_info.user_consents_to_analytics
+                        if user_info
+                        and user_info.user_consents_to_analytics is not None
+                        else False
+                    ),
                     org_id=None,
                     user=None,
                 )

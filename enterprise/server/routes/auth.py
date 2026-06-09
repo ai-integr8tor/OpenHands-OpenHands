@@ -252,7 +252,7 @@ async def _track_login_analytics_background(
 
 
 @oauth_router.get('/keycloak/callback')
-async def keycloak_callback(
+async def keycloak_callback(  # noqa: ambiguity-mine
     request: Request,
     background_tasks: BackgroundTasks,
     code: Optional[str] = None,
@@ -811,7 +811,7 @@ async def _should_redirect_to_onboarding(user_id: str, user: User) -> bool:
     - Either:
       - Deployment mode is 'cloud' (all users)
       - Deployment mode is 'self_hosted' AND user is the super admin
-        (first owner in their current org to accept TOS)
+        (first owner in their current org to accept TOS).
 
     Returns False if:
     - User has onboarding_completed=True (already completed)
@@ -928,9 +928,9 @@ async def accept_tos(request: Request):
                 )
                 analytics.track_user_signed_up(
                     ctx=ctx,
-                    email_domain=email.split('@')[1]
-                    if email and '@' in email
-                    else None,
+                    email_domain=(
+                        email.split('@')[1] if email and '@' in email else None
+                    ),
                 )
                 analytics.set_person_properties(
                     ctx=ctx,

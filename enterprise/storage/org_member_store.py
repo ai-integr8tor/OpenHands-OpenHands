@@ -1,6 +1,4 @@
-"""
-Store class for managing organization-member relationships.
-"""
+"""Store class for managing organization-member relationships."""
 
 from typing import Any, Optional
 from uuid import UUID

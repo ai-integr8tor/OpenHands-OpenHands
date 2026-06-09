@@ -71,7 +71,7 @@ jwt_service_dependency = depends_jwt_service()
 
 @slack_router.get('/install')
 async def install(state: str = ''):
-    """Forward into slack OAuth. (Most workflows can skip this and jump directly into slack authentication, so we skip OAuth state generation)"""
+    """Forward into slack OAuth. (Most workflows can skip this and jump directly into slack authentication, so we skip OAuth state generation)."""
     url = authorize_url_generator.generate(state=state)
     return RedirectResponse(url)
 
@@ -145,7 +145,7 @@ async def install_callback(
 
 
 @slack_router.get('/keycloak-callback')
-async def keycloak_callback(
+async def keycloak_callback(  # noqa: ambiguity-mine
     request: Request,
     background_tasks: BackgroundTasks,
     code: str = '',
@@ -277,7 +277,7 @@ async def keycloak_callback(
 
 
 @slack_router.post('/on-event')
-async def on_event(request: Request, background_tasks: BackgroundTasks):
+async def on_event(request: Request, background_tasks: BackgroundTasks):  # noqa: ambiguity-mine
     if not SLACK_WEBHOOKS_ENABLED:
         return JSONResponse({'success': 'slack_webhooks_disabled'})
     body = await request.body()

@@ -115,13 +115,11 @@ class SlackViewInterface(SlackMessageView, SummaryExtractionTracker, ABC):
 
     @abstractmethod
     async def _get_instructions(self, jinja_env: Environment) -> tuple[str, str]:
-        """Instructions passed when conversation is first initialized"""
-        pass
+        """Instructions passed when conversation is first initialized."""
 
     @abstractmethod
     async def create_or_update_conversation(self, jinja_env: Environment):
-        """Create a new conversation"""
-        pass
+        """Create a new conversation."""
 
     @abstractmethod
     def get_response_msg(self) -> str:

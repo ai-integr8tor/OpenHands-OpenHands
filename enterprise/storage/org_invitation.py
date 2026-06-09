@@ -1,6 +1,4 @@
-"""
-SQLAlchemy model for Organization Invitation.
-"""
+"""SQLAlchemy model for Organization Invitation."""
 
 from datetime import datetime
 from typing import TYPE_CHECKING

@@ -191,7 +191,7 @@ def _jira_dc_events_url(workspace_id: int) -> str:
     return f'https://{WEB_HOST}/integration/jira-dc/connections/{workspace_id}/events'
 
 
-async def _handle_workspace_link_creation(
+async def _handle_workspace_link_creation(  # noqa: ambiguity-mine
     user_id: str,
     jira_dc_user_id: str,
     target_workspace: str,
@@ -253,7 +253,9 @@ async def _handle_workspace_link_creation(
         )
 
 
-async def _validate_workspace_update_permissions(user_id: str, target_workspace: str):
+async def _validate_workspace_update_permissions(  # noqa: ambiguity-mine
+    user_id: str, target_workspace: str
+):
     """Validate that user can update the target workspace."""
     workspace = await jira_dc_manager.integration_store.get_workspace_by_name(
         target_workspace
@@ -710,7 +712,9 @@ async def update_jira_dc_workspace_status(
 
 
 @jira_dc_integration_router.post('/workspaces/link')
-async def create_workspace_link(request: Request, link_data: JiraDcLinkCreate):
+async def create_workspace_link(  # noqa: ambiguity-mine
+    request: Request, link_data: JiraDcLinkCreate
+):
     """Register a user mapping to a Jira DC workspace."""
     try:
         user_auth = cast(SaasUserAuth, await get_user_auth(request))
@@ -811,7 +815,7 @@ async def jira_dc_callback(request: Request, code: str, state: str):
         'code': code,
         'redirect_uri': JIRA_DC_REDIRECT_URI,
     }
-    response = requests.post(JIRA_DC_TOKEN_URL, data=token_payload)
+    response = requests.post(JIRA_DC_TOKEN_URL, data=token_payload, timeout=10)
     if response.status_code != 200:
         raise HTTPException(
             status_code=400, detail=f'Error fetching token: {response.text}'
@@ -825,7 +829,9 @@ async def jira_dc_callback(request: Request, code: str, state: str):
     if target_workspace != urlparse(JIRA_DC_BASE_URL).hostname:
         raise HTTPException(status_code=400, detail='Target workspace mismatch.')
 
-    jira_dc_user_response = requests.get(JIRA_DC_USER_INFO_URL, headers=headers)
+    jira_dc_user_response = requests.get(
+        JIRA_DC_USER_INFO_URL, headers=headers, timeout=10
+    )
     if jira_dc_user_response.status_code != 200:
         raise HTTPException(
             status_code=400,
@@ -947,7 +953,7 @@ async def jira_dc_callback(request: Request, code: str, state: str):
     '/workspaces/link',
     response_model=JiraDcUserResponse,
 )
-async def get_current_workspace_link(request: Request):
+async def get_current_workspace_link(request: Request):  # noqa: ambiguity-mine
     """Get current user's Jira DC integration details."""
     try:
         user_auth = cast(SaasUserAuth, await get_user_auth(request))
@@ -1007,7 +1013,7 @@ async def get_current_workspace_link(request: Request):
 
 
 @jira_dc_integration_router.post('/workspaces/unlink')
-async def unlink_workspace(request: Request):
+async def unlink_workspace(request: Request):  # noqa: ambiguity-mine
     """Unlink from Jira DC and, for integration owners, optionally revoke the hook.
 
     A non-owner user is only detached from the workspace (their personal link
@@ -1089,7 +1095,9 @@ async def unlink_workspace(request: Request):
     '/workspaces/validate/{workspace_name}',
     response_model=JiraDcValidateWorkspaceResponse,
 )
-async def validate_workspace_integration(request: Request, workspace_name: str):
+async def validate_workspace_integration(  # noqa: ambiguity-mine
+    request: Request, workspace_name: str
+):
     """Validate if the workspace has an active Jira DC integration."""
     try:
         await get_user_auth(request)

@@ -1045,12 +1045,16 @@ class UserStore:
 
         return UserSettings(
             keycloak_user_id=user_id,
-            llm_api_key=org_member.llm_api_key.get_secret_value()
-            if org_member.llm_api_key
-            else None,
-            llm_api_key_for_byor=org_member.llm_api_key_for_byor.get_secret_value()
-            if org_member.llm_api_key_for_byor
-            else None,
+            llm_api_key=(
+                org_member.llm_api_key.get_secret_value()
+                if org_member.llm_api_key
+                else None
+            ),
+            llm_api_key_for_byor=(
+                org_member.llm_api_key_for_byor.get_secret_value()
+                if org_member.llm_api_key_for_byor
+                else None
+            ),
             accepted_tos=user.accepted_tos,
             enable_sound_notifications=user.enable_sound_notifications,
             language=user.language,
@@ -1065,12 +1069,12 @@ class UserStore:
             sandbox_base_container_image=org.sandbox_base_container_image,
             sandbox_runtime_container_image=org.sandbox_runtime_container_image,
             user_version=org.org_version,
-            search_api_key=org.search_api_key.get_secret_value()
-            if org.search_api_key
-            else None,
-            sandbox_api_key=org.sandbox_api_key.get_secret_value()
-            if org.sandbox_api_key
-            else None,
+            search_api_key=(
+                org.search_api_key.get_secret_value() if org.search_api_key else None
+            ),
+            sandbox_api_key=(
+                org.sandbox_api_key.get_secret_value() if org.sandbox_api_key else None
+            ),
             max_budget_per_task=org.max_budget_per_task,
             v1_enabled=org.v1_enabled,
             sandbox_grouping_strategy=org.sandbox_grouping_strategy,
@@ -1149,7 +1153,7 @@ class UserStore:
 
 
 def _is_legacy_value_encrypted(value: str) -> bool:
-    """Check if a legacy value is encrypted by trying to decrypt it"""
+    """Check if a legacy value is encrypted by trying to decrypt it."""
     try:
         decrypt_legacy_value(value)
         return True
