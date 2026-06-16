@@ -30,6 +30,7 @@ export type MCPSSEServer = {
   name?: string;
   url: string;
   api_key?: string;
+  timeout?: number;
 };
 
 export type MCPStdioServer = {
