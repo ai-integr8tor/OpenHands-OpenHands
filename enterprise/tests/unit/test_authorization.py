@@ -10,14 +10,20 @@ from uuid import uuid4
 import pytest
 from fastapi import HTTPException
 from server.auth.authorization import (
+    ROLE_CAP_SCOPE_PREFIX,
     ROLE_PERMISSIONS,
     Permission,
     RoleName,
+    apply_role_cap,
+    effective_role_permissions,
     get_api_key_org_id_from_request,
     get_role_permissions,
     get_user_org_role,
     has_permission,
+    has_permission_for_role,
+    make_role_cap_scope,
     require_permission,
+    role_cap_from_scopes,
 )
 
 # =============================================================================
@@ -449,11 +455,14 @@ class TestGetUserOrgRole:
 # =============================================================================
 
 
-def _create_mock_request(api_key_org_id=None):
-    """Helper to create a mock request with optional api_key_org_id."""
+def _create_mock_request(api_key_org_id=None, api_key_scopes=None):
+    """Helper to create a mock request with optional api_key_org_id/scopes."""
     mock_request = MagicMock()
     mock_user_auth = MagicMock()
     mock_user_auth.get_api_key_org_id.return_value = api_key_org_id
+    # Default to None (uncapped / non-API-key auth) so existing tests keep their
+    # behavior; the role-cap tests pass an explicit scope list.
+    mock_user_auth.get_api_key_scopes.return_value = api_key_scopes
     mock_request.state.user_auth = mock_user_auth
     return mock_request
 
@@ -1019,12 +1028,16 @@ class TestGetApiKeyOrgIdFromRequest:
 # =============================================================================
 
 
-def _create_mock_request_with_email(api_key_org_id=None, user_email='user@example.com'):
+def _create_mock_request_with_email(
+    api_key_org_id=None, user_email='user@example.com', api_key_scopes=None
+):
     """Helper to create a mock request with optional api_key_org_id and email."""
     mock_request = MagicMock()
     mock_user_auth = MagicMock()
     # get_api_key_org_id is sync, not async
     mock_user_auth.get_api_key_org_id.return_value = api_key_org_id
+    # get_api_key_scopes is sync; default None (cookie / uncapped auth)
+    mock_user_auth.get_api_key_scopes.return_value = api_key_scopes
     # get_user_email is async
     mock_user_auth.get_user_email = AsyncMock(return_value=user_email)
     mock_request.state.user_auth = mock_user_auth
@@ -1243,3 +1256,164 @@ class TestRequireFinancialDataAccess:
 
         assert exc_info.value.status_code == 403
         assert 'API key is not authorized' in exc_info.value.detail
+
+
+# =============================================================================
+# Tests for the API-key role-cap mechanism (Phase 2 of #14912)
+# =============================================================================
+
+
+class TestRoleCapHelpers:
+    """Unit tests for the role-cap scope helpers."""
+
+    def test_make_role_cap_scope(self):
+        assert make_role_cap_scope('member') == f'{ROLE_CAP_SCOPE_PREFIX}member'
+        assert make_role_cap_scope('owner') == 'openhands:role:owner'
+
+    def test_role_cap_from_scopes_none_or_empty(self):
+        assert role_cap_from_scopes(None) is None
+        assert role_cap_from_scopes([]) is None
+
+    def test_role_cap_from_scopes_ignores_non_role_scopes(self):
+        assert role_cap_from_scopes(['full', 'automation:kv:read:org']) is None
+
+    def test_role_cap_from_scopes_extracts_role(self):
+        assert role_cap_from_scopes([make_role_cap_scope('member')]) == 'member'
+
+    def test_role_cap_from_scopes_picks_least_privileged(self):
+        scopes = [make_role_cap_scope('owner'), make_role_cap_scope('member')]
+        assert role_cap_from_scopes(scopes) == 'member'
+
+    def test_apply_role_cap_uncapped_returns_actual(self):
+        assert apply_role_cap('owner', None) == 'owner'
+        assert apply_role_cap('owner', ['automation:kv:read:org']) == 'owner'
+
+    def test_apply_role_cap_reduces_owner_to_member(self):
+        assert apply_role_cap('owner', [make_role_cap_scope('member')]) == 'member'
+
+    def test_apply_role_cap_never_escalates(self):
+        assert apply_role_cap('member', [make_role_cap_scope('owner')]) == 'member'
+
+    def test_apply_role_cap_none_role(self):
+        assert apply_role_cap(None, [make_role_cap_scope('member')]) is None
+
+    def test_effective_role_permissions_capped(self):
+        capped = effective_role_permissions('owner', [make_role_cap_scope('member')])
+        assert capped == ROLE_PERMISSIONS[RoleName.MEMBER]
+        assert Permission.DELETE_ORGANIZATION not in capped
+        assert Permission.VIEW_BILLING not in capped
+        assert Permission.MANAGE_SECRETS in capped
+
+    def test_has_permission_for_role(self):
+        assert has_permission_for_role('owner', Permission.DELETE_ORGANIZATION)
+        assert not has_permission_for_role('member', Permission.DELETE_ORGANIZATION)
+        assert not has_permission_for_role(None, Permission.MANAGE_SECRETS)
+
+
+class TestRequirePermissionRoleCap:
+    """require_permission honors the API-key role cap."""
+
+    @pytest.mark.asyncio
+    async def test_member_capped_key_denied_owner_only_permission(self):
+        user_id = str(uuid4())
+        org_id = uuid4()
+        mock_request = _create_mock_request(
+            api_key_scopes=[make_role_cap_scope('member')]
+        )
+        owner_role = MagicMock()
+        owner_role.name = 'owner'
+        with patch(
+            'server.auth.authorization.get_user_org_role',
+            AsyncMock(return_value=owner_role),
+        ):
+            permission_checker = require_permission(Permission.DELETE_ORGANIZATION)
+            with pytest.raises(HTTPException) as exc_info:
+                await permission_checker(
+                    request=mock_request, org_id=org_id, user_id=user_id
+                )
+            assert exc_info.value.status_code == 403
+            assert 'delete_organization' in exc_info.value.detail.lower()
+
+    @pytest.mark.asyncio
+    async def test_member_capped_key_allowed_member_permission(self):
+        user_id = str(uuid4())
+        org_id = uuid4()
+        mock_request = _create_mock_request(
+            api_key_scopes=[make_role_cap_scope('member')]
+        )
+        owner_role = MagicMock()
+        owner_role.name = 'owner'
+        with patch(
+            'server.auth.authorization.get_user_org_role',
+            AsyncMock(return_value=owner_role),
+        ):
+            permission_checker = require_permission(Permission.MANAGE_SECRETS)
+            result = await permission_checker(
+                request=mock_request, org_id=org_id, user_id=user_id
+            )
+            assert result == user_id
+
+    @pytest.mark.asyncio
+    async def test_uncapped_owner_key_allowed_owner_permission(self):
+        user_id = str(uuid4())
+        org_id = uuid4()
+        mock_request = _create_mock_request(api_key_scopes=['full'])
+        owner_role = MagicMock()
+        owner_role.name = 'owner'
+        with patch(
+            'server.auth.authorization.get_user_org_role',
+            AsyncMock(return_value=owner_role),
+        ):
+            permission_checker = require_permission(Permission.DELETE_ORGANIZATION)
+            result = await permission_checker(
+                request=mock_request, org_id=org_id, user_id=user_id
+            )
+            assert result == user_id
+
+
+class TestRequireFinancialDataAccessRoleCap:
+    """require_financial_data_access honors the API-key role cap."""
+
+    @pytest.mark.asyncio
+    async def test_member_capped_key_denied_even_for_owner(self):
+        from server.auth.authorization import require_financial_data_access
+
+        user_id = str(uuid4())
+        org_id = uuid4()
+        mock_request = _create_mock_request_with_email(
+            user_email='user@company.com',
+            api_key_scopes=[make_role_cap_scope('member')],
+        )
+        owner_role = MagicMock()
+        owner_role.name = 'owner'
+        with patch(
+            'server.auth.authorization.get_user_org_role',
+            AsyncMock(return_value=owner_role),
+        ):
+            with pytest.raises(HTTPException) as exc_info:
+                await require_financial_data_access(
+                    request=mock_request, org_id=org_id, user_id=user_id
+                )
+            assert exc_info.value.status_code == 403
+
+    @pytest.mark.asyncio
+    async def test_member_capped_key_denied_even_with_openhands_email(self):
+        from server.auth.authorization import require_financial_data_access
+
+        user_id = str(uuid4())
+        org_id = uuid4()
+        mock_request = _create_mock_request_with_email(
+            user_email='admin@openhands.dev',
+            api_key_scopes=[make_role_cap_scope('member')],
+        )
+        member_role = MagicMock()
+        member_role.name = 'member'
+        with patch(
+            'server.auth.authorization.get_user_org_role',
+            AsyncMock(return_value=member_role),
+        ):
+            with pytest.raises(HTTPException) as exc_info:
+                await require_financial_data_access(
+                    request=mock_request, org_id=org_id, user_id=user_id
+                )
+            assert exc_info.value.status_code == 403

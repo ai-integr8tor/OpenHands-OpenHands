@@ -99,6 +99,29 @@ class ApiKeyStore:
         scopes = list(result.scalars().all())
         return scopes if scopes else [FULL_SCOPE]
 
+    @staticmethod
+    async def _ensure_scope_rows(
+        session: AsyncSession, api_key_id: int, scopes: list[str]
+    ) -> None:
+        """Idempotently add any missing scope rows to an existing key.
+
+        Additive only — it never removes scopes a key already has. This lets an
+        internal caller *tighten* an already-existing system key by attaching a
+        scope (e.g. a ``openhands:role:member`` cap) so the reduced-privilege
+        guarantee also covers keys minted before scopes existed. Enforcement
+        combines role-cap scopes to the least-privileged one, so adding a cap can
+        only narrow, never widen, the key's effective role.
+        """
+        if not scopes:
+            return
+        result = await session.execute(
+            select(ApiKeyScope.scope).filter(ApiKeyScope.api_key_id == api_key_id)
+        )
+        existing = set(result.scalars().all())
+        for scope in scopes:
+            if scope not in existing:
+                session.add(ApiKeyScope(api_key_id=api_key_id, scope=scope))
+
     async def create_api_key(
         self,
         user_id: str,
@@ -176,10 +199,13 @@ class ApiKeyStore:
             user_id: The ID of the user to create the key for
             org_id: The organization ID to associate the key with
             name: Required name for the key (will be prefixed with __SYSTEM__:)
-            scopes: Optional opaque, namespaced scope strings attached only when
-                a *new* key is minted. Omitted/empty means the implicit ``full``
-                scope (no behavior change). Scopes of an already-existing,
-                non-expired key are left untouched.
+            scopes: Optional opaque, namespaced scope strings. For a *new* key
+                they are attached at creation. For an already-existing,
+                non-expired key they are reconciled **additively** (missing rows
+                are added; nothing is removed) so an internal caller can tighten
+                an existing key — e.g. attach a ``openhands:role:member`` cap.
+                Omitted/empty means the implicit ``full`` scope (no behavior
+                change).
 
         Returns:
             The API key (existing or newly created)
@@ -220,7 +246,8 @@ class ApiKeyStore:
                         await session.delete(existing_key)
                         await session.commit()
                     else:
-                        # Key exists and is not expired, return it
+                        # Key exists and is not expired, return it (tightening
+                        # any requested scopes onto it first).
                         logger.debug(
                             'Returning existing system API key',
                             extra={
@@ -229,9 +256,14 @@ class ApiKeyStore:
                                 'key_name': system_key_name,
                             },
                         )
+                        await self._ensure_scope_rows(
+                            session, existing_key.id, normalized_scopes
+                        )
+                        await session.commit()
                         return existing_key.key
                 else:
-                    # Key exists and has no expiration, return it
+                    # Key exists and has no expiration, return it (tightening
+                    # any requested scopes onto it first).
                     logger.debug(
                         'Returning existing system API key',
                         extra={
@@ -240,6 +272,10 @@ class ApiKeyStore:
                             'key_name': system_key_name,
                         },
                     )
+                    await self._ensure_scope_rows(
+                        session, existing_key.id, normalized_scopes
+                    )
+                    await session.commit()
                     return existing_key.key
 
         # Create new key (no expiration)

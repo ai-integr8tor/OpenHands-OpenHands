@@ -60,6 +60,26 @@ class TestCreateUserApiKeyRequest:
             name='automation',
         )
         assert request.name == 'automation'
+        # Defaults to the least-privileged ``member`` role cap.
+        assert request.role == 'member'
+
+    def test_role_defaults_to_member(self):
+        """Role defaults to member when omitted."""
+        assert CreateUserApiKeyRequest(name='automation').role == 'member'
+
+    def test_role_can_be_overridden(self):
+        """A valid role override is accepted and normalized."""
+        assert CreateUserApiKeyRequest(name='a', role='admin').role == 'admin'
+        assert CreateUserApiKeyRequest(name='a', role='  owner ').role == 'owner'
+
+    def test_role_can_be_null_for_uncapped_key(self):
+        """An explicit null role mints an uncapped key."""
+        assert CreateUserApiKeyRequest(name='a', role=None).role is None
+
+    def test_invalid_role_fails(self):
+        """An unrecognized role value is rejected."""
+        with pytest.raises(ValueError):
+            CreateUserApiKeyRequest(name='a', role='superuser')
 
     def test_name_is_required(self):
         """Test that name field is required."""
@@ -184,12 +204,57 @@ class TestGetOrCreateApiKeyForUser:
         assert response.user_id == valid_user_id
         assert response.org_id == str(valid_org_id)
         assert response.name == 'automation'
+        # Defaults to a member-capped key (least privilege for automations).
+        assert response.role == 'member'
 
-        # Verify the store was called with correct arguments
+        # Verify the store was called with correct arguments, including the
+        # default ``member`` role cap expressed as a reserved scope.
         mock_api_key_store.get_or_create_system_api_key.assert_called_once_with(
             user_id=valid_user_id,
             org_id=valid_org_id,
             name='automation',
+            scopes=['openhands:role:member'],
+        )
+
+    @pytest.mark.asyncio
+    async def test_null_role_mints_uncapped_key(self, valid_user_id, valid_org_id):
+        """An explicit null role passes no scopes (uncapped, full key)."""
+        mock_user = MagicMock()
+        mock_org_member = MagicMock()
+        mock_api_key_store = MagicMock()
+        mock_api_key_store.get_or_create_system_api_key = AsyncMock(
+            return_value='sk-oh-uncapped'
+        )
+        request = CreateUserApiKeyRequest(name='automation', role=None)
+
+        with patch('server.routes.service.AUTOMATIONS_SERVICE_KEY', 'test-key'):
+            with patch(
+                'server.routes.service.UserStore.get_user_by_id', new_callable=AsyncMock
+            ) as mock_get_user:
+                with patch(
+                    'server.routes.service.OrgMemberStore.get_org_member',
+                    new_callable=AsyncMock,
+                ) as mock_get_member:
+                    with patch(
+                        'server.routes.service.ApiKeyStore.get_instance'
+                    ) as mock_get_store:
+                        mock_get_user.return_value = mock_user
+                        mock_get_member.return_value = mock_org_member
+                        mock_get_store.return_value = mock_api_key_store
+
+                        response = await get_or_create_api_key_for_user(
+                            user_id=valid_user_id,
+                            org_id=valid_org_id,
+                            request=request,
+                            x_service_api_key='test-key',
+                        )
+
+        assert response.role is None
+        mock_api_key_store.get_or_create_system_api_key.assert_called_once_with(
+            user_id=valid_user_id,
+            org_id=valid_org_id,
+            name='automation',
+            scopes=None,
         )
 
     @pytest.mark.asyncio

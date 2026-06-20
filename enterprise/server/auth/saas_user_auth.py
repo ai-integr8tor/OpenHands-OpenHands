@@ -15,6 +15,7 @@ from server.auth.auth_error import (
     NoCredentialsError,
 )
 from server.auth.authorization import (
+    apply_role_cap,
     get_role_permissions,
     get_user_org_role,
 )
@@ -608,16 +609,27 @@ class SaasUserAuth(UserAuth):
             role = await get_user_org_role(self.user_id, effective_org_id)
             role_name = role.name if role else None
 
-            # Get permissions for the role
+            # Cap the effective role/permissions down to whatever the API key
+            # used for this request is scoped to. A request authenticated with
+            # an automation key minted as ``openhands:role:member`` therefore
+            # reports member-level permissions here even when the owning user is
+            # an org owner. Cookie auth and uncapped keys are unaffected. This is
+            # the surface the issue calls out: validating such a key via
+            # /users/me must not return the owner's full permission set.
+            effective_role_name = apply_role_cap(role_name, self.api_key_scopes)
+
+            # Get permissions for the effective (capped) role
             permissions: list[str] = []
-            if role_name:
-                role_permissions = get_role_permissions(role_name)
+            if effective_role_name:
+                role_permissions = get_role_permissions(effective_role_name)
                 permissions = [p.value for p in role_permissions]
 
-            # Cache the results
+            # Cache the results. Report the effective (capped) role so that the
+            # reported role and permissions stay consistent for API-key callers;
+            # for cookie/uncapped auth this equals the real role.
             self._org_id = str(effective_org_id)
             self._org_name = org.name
-            self._role = role_name
+            self._role = effective_role_name
             self._permissions = permissions
 
             return {

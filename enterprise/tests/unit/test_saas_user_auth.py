@@ -1316,3 +1316,82 @@ class TestOpenHandsApiKey:
             assert result is not None
             assert 'OPENHANDS_API_KEY' in result.custom_secrets
             assert len(result.custom_secrets) == 1
+
+
+class TestGetOrgInfoRoleCap:
+    """get_org_info caps reported role/permissions to the API key's scope."""
+
+    @pytest.mark.asyncio
+    async def test_member_capped_key_reports_member_permissions_for_owner(self):
+        """An owner authenticating with a member-capped key reports member perms."""
+        from server.auth.authorization import ROLE_PERMISSIONS, RoleName
+
+        org_id = uuid.uuid4()
+        user_auth = SaasUserAuth(
+            user_id='owner-user',
+            refresh_token=SecretStr('refresh_token'),
+            api_key_scopes=['openhands:role:member'],
+        )
+        user_auth.get_effective_org_id = AsyncMock(return_value=org_id)
+
+        mock_org = MagicMock()
+        mock_org.name = 'Acme'
+        owner_role = MagicMock()
+        owner_role.name = 'owner'
+
+        with (
+            patch(
+                'server.auth.saas_user_auth.OrgStore.get_org_by_id',
+                AsyncMock(return_value=mock_org),
+            ),
+            patch(
+                'server.auth.saas_user_auth.get_user_org_role',
+                AsyncMock(return_value=owner_role),
+            ),
+        ):
+            info = await user_auth.get_org_info()
+
+        assert info is not None
+        # Reported role and permissions are capped to member.
+        assert info['role'] == 'member'
+        expected = {p.value for p in ROLE_PERMISSIONS[RoleName.MEMBER]}
+        assert set(info['permissions']) == expected
+        # Owner-only permissions are absent.
+        assert 'delete_organization' not in info['permissions']
+        assert 'view_billing' not in info['permissions']
+
+    @pytest.mark.asyncio
+    async def test_uncapped_owner_key_reports_owner_permissions(self):
+        """Without a cap, an owner key reports full owner perms (no change)."""
+        from server.auth.authorization import ROLE_PERMISSIONS, RoleName
+
+        org_id = uuid.uuid4()
+        user_auth = SaasUserAuth(
+            user_id='owner-user',
+            refresh_token=SecretStr('refresh_token'),
+            api_key_scopes=['full'],
+        )
+        user_auth.get_effective_org_id = AsyncMock(return_value=org_id)
+
+        mock_org = MagicMock()
+        mock_org.name = 'Acme'
+        owner_role = MagicMock()
+        owner_role.name = 'owner'
+
+        with (
+            patch(
+                'server.auth.saas_user_auth.OrgStore.get_org_by_id',
+                AsyncMock(return_value=mock_org),
+            ),
+            patch(
+                'server.auth.saas_user_auth.get_user_org_role',
+                AsyncMock(return_value=owner_role),
+            ),
+        ):
+            info = await user_auth.get_org_info()
+
+        assert info is not None
+        assert info['role'] == 'owner'
+        expected = {p.value for p in ROLE_PERMISSIONS[RoleName.OWNER]}
+        assert set(info['permissions']) == expected
+        assert 'delete_organization' in info['permissions']

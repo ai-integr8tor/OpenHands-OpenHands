@@ -99,6 +99,106 @@ class RoleName(str, Enum):
     MEMBER = 'member'
 
 
+# Privilege ordering, most-privileged first. Used to "cap" the effective role
+# carried by an API key down to the lesser of (the user's real org role, the
+# cap requested when the key was minted). Capping can only *reduce* privilege,
+# never grant more than the user already has, so it is always safe.
+_ROLE_PRIVILEGE_ORDER: tuple[RoleName, ...] = (
+    RoleName.OWNER,
+    RoleName.ADMIN,
+    RoleName.MEMBER,
+)
+
+
+def _role_privilege_index(role_name: str) -> int:
+    """Return the privilege index of a role (lower index = more privileged).
+
+    Unknown role names sort as least-privileged so that an unrecognized value
+    can never accidentally *grant* privilege when used as a cap.
+    """
+    try:
+        return _ROLE_PRIVILEGE_ORDER.index(RoleName(role_name))
+    except ValueError:
+        return len(_ROLE_PRIVILEGE_ORDER)
+
+
+# Reserved, OpenHands-owned scope namespace that maps an API key to an org
+# role. Unlike third-party scopes (which OpenHands stores opaquely and never
+# interprets), this namespace is interpreted by OpenHands itself: a key
+# carrying ``openhands:role:member`` is treated as if its bearer had at most
+# the ``member`` role, regardless of the owner's actual (possibly higher) role.
+# This is the bridge from the Phase 1 opaque-scope foundation to the concrete
+# org role/permission system that already exists today.
+ROLE_CAP_SCOPE_PREFIX = 'openhands:role:'
+
+
+def make_role_cap_scope(role_name: str) -> str:
+    """Build the reserved role-cap scope string for a role (e.g. ``member``)."""
+    return f'{ROLE_CAP_SCOPE_PREFIX}{role_name}'
+
+
+def role_cap_from_scopes(scopes: list[str] | None) -> str | None:
+    """Extract the effective role cap from an API key's scope list.
+
+    Returns the *least privileged* role named by any ``openhands:role:<role>``
+    scope (so multiple caps combine to the most restrictive), or ``None`` when
+    the key carries no role-cap scope (i.e. it is uncapped). The reserved
+    ``full`` sentinel and all non-role scopes are ignored.
+    """
+    if not scopes:
+        return None
+    cap: str | None = None
+    for scope in scopes:
+        if not scope.startswith(ROLE_CAP_SCOPE_PREFIX):
+            continue
+        role_name = scope[len(ROLE_CAP_SCOPE_PREFIX) :].strip()
+        if not role_name:
+            continue
+        if cap is None or _role_privilege_index(role_name) > _role_privilege_index(cap):
+            cap = role_name
+    return cap
+
+
+def apply_role_cap(role_name: str | None, scopes: list[str] | None) -> str | None:
+    """Cap a real org role down to the role permitted by the key's scopes.
+
+    The effective role is the *least privileged* of the user's actual role and
+    the role cap carried by the API key. Returns ``role_name`` unchanged when
+    the key is uncapped or the cap would not reduce privilege (capping never
+    escalates). ``None`` in/``None`` out (non-member users stay non-members).
+    """
+    if role_name is None:
+        return None
+    cap = role_cap_from_scopes(scopes)
+    if cap is None:
+        return role_name
+    if _role_privilege_index(cap) > _role_privilege_index(role_name):
+        return cap
+    return role_name
+
+
+def effective_role_permissions(
+    role_name: str | None, scopes: list[str] | None
+) -> frozenset[Permission]:
+    """Permissions for a role after applying any API-key role cap."""
+    effective = apply_role_cap(role_name, scopes)
+    if effective is None:
+        return frozenset()
+    return get_role_permissions(effective)
+
+
+async def get_api_key_scopes_from_request(request: Request) -> list[str] | None:
+    """Get the scopes carried by the API key used to authenticate ``request``.
+
+    Returns ``None`` when the request is not authenticated via an API key
+    (e.g. cookie auth) or the auth backend does not expose scopes.
+    """
+    user_auth = getattr(request.state, 'user_auth', None)
+    if user_auth and hasattr(user_auth, 'get_api_key_scopes'):
+        return user_auth.get_api_key_scopes()
+    return None
+
+
 # Permission mappings for each role
 ROLE_PERMISSIONS: dict[RoleName, frozenset[Permission]] = {
     RoleName.OWNER: frozenset(
@@ -230,6 +330,17 @@ def has_permission(user_role: Role, permission: Permission) -> bool:
     return permission in permissions
 
 
+def has_permission_for_role(role_name: str | None, permission: Permission) -> bool:
+    """Check if a role (by name) has a permission.
+
+    Accepts a role *name* rather than a ``Role`` object so callers can pass an
+    effective (possibly API-key-capped) role name. ``None`` has no permissions.
+    """
+    if role_name is None:
+        return False
+    return permission in get_role_permissions(role_name)
+
+
 async def get_api_key_org_id_from_request(request: Request) -> UUID | None:
     """Get the org_id bound to the API key used for authentication.
 
@@ -321,13 +432,21 @@ def require_permission(permission: Permission):
                 detail='User is not a member of this organization',
             )
 
-        if not has_permission(user_role, permission):
+        # Cap the effective role down to whatever the authenticating API key is
+        # scoped to (e.g. an automation key minted as ``openhands:role:member``
+        # never gets owner/admin powers, even when its owner is an org owner).
+        # Cookie auth and uncapped keys leave the real role unchanged.
+        api_key_scopes = await get_api_key_scopes_from_request(request)
+        effective_role_name = apply_role_cap(user_role.name, api_key_scopes)
+
+        if not has_permission_for_role(effective_role_name, permission):
             logger.warning(
                 'Insufficient permissions',
                 extra={
                     'user_id': user_id,
                     'org_id': str(org_id),
                     'user_role': user_role.name,
+                    'effective_role': effective_role_name,
                     'required_permission': permission.value,
                 },
             )
@@ -389,11 +508,21 @@ async def require_financial_data_access(
                 detail='API key is not authorized for this organization',
             )
 
+    # Honor any API-key role cap so a reduced-privilege key (e.g. an automation
+    # key capped to ``member``) cannot read financial data even when its owner
+    # holds an admin/owner role or an @openhands.dev email. ``key_allows_admin``
+    # is True for cookie auth and uncapped keys, and for keys capped at
+    # admin/owner; it is False once the cap drops below admin.
+    api_key_scopes = await get_api_key_scopes_from_request(request)
+    key_allows_admin = (
+        apply_role_cap(RoleName.ADMIN.value, api_key_scopes) == RoleName.ADMIN.value
+    )
+
     # Check if user has @openhands.dev email
     user_auth = await get_user_auth(request)
     user_email = await user_auth.get_user_email()
 
-    if user_email and user_email.endswith('@openhands.dev'):
+    if key_allows_admin and user_email and user_email.endswith('@openhands.dev'):
         logger.debug(
             'Financial data access granted via @openhands.dev email',
             extra={'user_id': user_id, 'org_id': str(org_id)},
@@ -413,7 +542,9 @@ async def require_financial_data_access(
             detail='User is not a member of this organization',
         )
 
-    if user_role.name not in (RoleName.OWNER.value, RoleName.ADMIN.value):
+    effective_role_name = apply_role_cap(user_role.name, api_key_scopes)
+
+    if effective_role_name not in (RoleName.OWNER.value, RoleName.ADMIN.value):
         logger.warning(
             'Financial data access denied - insufficient role',
             extra={

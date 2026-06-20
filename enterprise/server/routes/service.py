@@ -13,6 +13,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Header, HTTPException, status
 from pydantic import BaseModel, field_validator
+from server.auth.authorization import RoleName, make_role_cap_scope
 from storage.api_key_store import ApiKeyStore
 from storage.org_member_store import OrgMemberStore
 from storage.user_store import UserStore
@@ -22,6 +23,14 @@ from openhands.app_server.utils.logger import openhands_logger as logger
 # Environment variable for the service API key
 AUTOMATIONS_SERVICE_KEY = os.getenv('AUTOMATIONS_SERVICE_KEY', '').strip()
 
+# Default role cap for keys minted through this internal service endpoint.
+# Automation runs should act with org *member* privileges, not the (possibly
+# org-owner) minting user's full authority — so a leaked or misbehaving
+# automation key cannot manage members, billing, org settings, or org claims.
+# Callers may override via the request ``role`` field (including ``null`` for an
+# uncapped key) but can never exceed the user's real org role.
+DEFAULT_SERVICE_KEY_ROLE = RoleName.MEMBER.value
+
 service_router = APIRouter(prefix='/api/service', tags=['Service'])
 
 
@@ -29,6 +38,11 @@ class CreateUserApiKeyRequest(BaseModel):
     """Request model for creating an API key on behalf of a user."""
 
     name: str  # Required - used to identify the key
+    # Role to cap the minted key to. Defaults to ``member`` (least privilege for
+    # automations). Pass an explicit ``null`` to mint an uncapped key. The cap
+    # only ever *reduces* privilege — it can never grant more than the user's
+    # actual org role.
+    role: str | None = DEFAULT_SERVICE_KEY_ROLE
 
     @field_validator('name')
     @classmethod
@@ -36,6 +50,17 @@ class CreateUserApiKeyRequest(BaseModel):
         if not v or not v.strip():
             raise ValueError('name is required and cannot be empty')
         return v.strip()
+
+    @field_validator('role')
+    @classmethod
+    def validate_role(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        v = v.strip()
+        valid = {r.value for r in RoleName}
+        if v not in valid:
+            raise ValueError(f'role must be one of {sorted(valid)} or null')
+        return v
 
 
 class CreateUserApiKeyResponse(BaseModel):
@@ -45,6 +70,9 @@ class CreateUserApiKeyResponse(BaseModel):
     user_id: str
     org_id: str
     name: str
+    # Effective role cap applied to the key (``None`` if uncapped). Lets the
+    # caller confirm the reduced-privilege level it actually received.
+    role: str | None = None
 
 
 class ServiceInfoResponse(BaseModel):
@@ -170,14 +198,19 @@ async def get_or_create_api_key_for_user(
             detail=f'User {user_id} is not a member of org {org_id}',
         )
 
-    # Get or create the system API key
+    # Get or create the system API key. By default the key is capped to the
+    # ``member`` role so automation runs never inherit the minting user's
+    # owner/admin authority (the reduced-privilege guarantee). A ``null`` role
+    # mints an uncapped key.
     api_key_store = ApiKeyStore.get_instance()
+    scopes = [make_role_cap_scope(request.role)] if request.role else None
 
     try:
         api_key = await api_key_store.get_or_create_system_api_key(
             user_id=user_id,
             org_id=org_id,
             name=request.name,
+            scopes=scopes,
         )
     except Exception as e:
         logger.exception(
@@ -208,6 +241,7 @@ async def get_or_create_api_key_for_user(
         user_id=user_id,
         org_id=str(org_id),
         name=request.name,
+        role=request.role,
     )
 
 
