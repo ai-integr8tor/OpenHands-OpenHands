@@ -9,14 +9,12 @@ from pydantic import SecretStr
 from server.auth.token_manager import TokenManager
 from server.constants import LITE_LLM_API_URL
 from server.logger import logger
-from server.routes.org_models import OrgMemberSettingsUpdate
 from sqlalchemy import select
 from sqlalchemy.orm import joinedload
 from storage.database import a_session_maker
 from storage.lite_llm_manager import LiteLlmManager, get_openhands_cloud_key_alias
 from storage.org import Org
 from storage.org_member import OrgMember
-from storage.org_member_store import OrgMemberStore
 from storage.org_store import OrgStore
 from storage.user import User
 from storage.user_settings import UserSettings
@@ -41,28 +39,6 @@ from openhands.sdk.llm.utils.openhands_provider import (
 # ACP environment variables) — both are dict-of-items collections that
 # represent one member's personal configuration, not org-wide defaults.
 MEMBER_PRIVATE_AGENT_KEYS: frozenset[str] = WHOLESALE_REPLACEMENT_KEYS
-
-
-def _split_member_private_keys(
-    agent_settings_diff: dict[str, Any],
-) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Split an agent_settings dump into (shared, private) halves.
-
-    The shared half is safe to write to ``org.agent_settings`` and to
-    broadcast through ``update_all_members_settings_async``. The private
-    half must be applied only to the acting member's row.
-    """
-    private = {
-        key: agent_settings_diff[key]
-        for key in MEMBER_PRIVATE_AGENT_KEYS
-        if key in agent_settings_diff
-    }
-    shared = {
-        key: value
-        for key, value in agent_settings_diff.items()
-        if key not in MEMBER_PRIVATE_AGENT_KEYS
-    }
-    return shared, private
 
 
 @dataclass
@@ -375,54 +351,31 @@ class SaasSettingsStore(SettingsStore):
                 )
 
             effective_agent_settings_diff = self._get_persisted_agent_settings(item)
-
-            # Keep mcp_config / acp_env scoped to the acting member only.
-            # ``shared_agent_settings_diff`` is the slice safe for org-wide
-            # state; ``private_agent_settings_diff`` is applied below to the
-            # acting member's row only so other members don't inherit one
-            # user's MCP servers (or ACP env vars).
-            shared_agent_settings_diff, private_agent_settings_diff = (
-                _split_member_private_keys(effective_agent_settings_diff)
-            )
-
-            # Strip any pre-existing private keys from the org dump before
-            # merging, so legacy values written by older code paths are
-            # cleaned up on the next save and stop leaking to other members.
-            org_agent_settings_dump = OrgStore.get_agent_settings_from_org(
-                org
-            ).model_dump(mode='json')
-            for private_key in MEMBER_PRIVATE_AGENT_KEYS:
-                org_agent_settings_dump.pop(private_key, None)
-
-            # Single assignment so SQLAlchemy tracks the change
-            org.agent_settings = deep_merge_with_wholesale_keys(
-                org_agent_settings_dump,
-                shared_agent_settings_diff,
-            )
-
             effective_conversation_diff = item.conversation_settings.model_dump(
                 mode='json'
             )
-            org.conversation_settings = deep_merge(
-                OrgStore.get_conversation_settings_from_org(org).model_dump(
-                    mode='json'
-                ),
+
+            # A member's personal save writes only their own row. It must not
+            # mutate the org default or other members' rows: org-wide defaults
+            # are set through the dedicated org-defaults path, and members
+            # live-inherit the org default at load() (which merges the org dump
+            # under the member diff), so no org-wide broadcast is needed.
+            org_member.agent_settings_diff = deep_merge_with_wholesale_keys(
+                dict(org_member.agent_settings_diff),
+                effective_agent_settings_diff,
+            )
+            org_member.conversation_settings_diff = deep_merge(
+                dict(org_member.conversation_settings_diff),
                 effective_conversation_diff,
             )
 
+            # Top-level (non-agent/conversation) settings are the user's own.
             kwargs = item.model_dump(context={'expose_secrets': True})
             kwargs.pop('agent_settings', None)
             kwargs.pop('conversation_settings', None)
-
             for key, value in kwargs.items():
                 if hasattr(user, key):
                     setattr(user, key, value)
-                if hasattr(org, key) and key not in {
-                    'llm_api_key',
-                    'agent_settings',
-                    'conversation_settings',
-                }:
-                    setattr(org, key, value)
 
             current_member_llm_api_key = item.agent_settings.llm.api_key
             org_default_llm_api_key = org.llm_api_key
@@ -436,29 +389,6 @@ class SaasSettingsStore(SettingsStore):
                 if current_member_llm_api_key
                 else None
             )
-
-            await OrgMemberStore.update_all_members_settings_async(
-                session,
-                org_id,
-                OrgMemberSettingsUpdate(
-                    agent_settings_diff=shared_agent_settings_diff,
-                    conversation_settings_diff=effective_conversation_diff,
-                    llm_api_key=(
-                        current_member_llm_api_key_raw  # type: ignore[arg-type]
-                        if not uses_managed_llm_key
-                        else None
-                    ),
-                ),
-            )
-
-            # Member-private keys (mcp_config, acp_env) live only on the
-            # acting member's row. Use the wholesale-replacement semantics
-            # so deletes stick (APP-1862).
-            if private_agent_settings_diff:
-                org_member.agent_settings_diff = deep_merge_with_wholesale_keys(
-                    dict(org_member.agent_settings_diff),
-                    private_agent_settings_diff,
-                )
 
             if uses_managed_llm_key and current_member_llm_api_key is not None:
                 # Managed/proxy key — store on this member but mark as org-managed

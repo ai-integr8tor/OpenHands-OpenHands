@@ -569,10 +569,12 @@ async def test_load_canonicalizes_legacy_litellm_proxy_llm_profiles(
 
 
 @pytest.mark.asyncio
-async def test_store_updates_org_defaults_and_all_members_for_shared_keys(
+async def test_member_save_stays_private_and_does_not_clobber_org_or_members(
     session_maker, async_session_maker, org_with_multiple_members_fixture
 ):
-    """External provider keys should still sync as an org-wide shared snapshot."""
+    """A member's personal save writes only their own row: it must not mutate
+    the org default or other members. Other members keep their own model + key
+    (the old behavior sprayed the saver's external model/key across the org)."""
     from sqlalchemy import select
     from storage.org import Org
     from storage.org_member import OrgMember
@@ -595,9 +597,10 @@ async def test_store_updates_org_defaults_and_all_members_for_shared_keys(
     with session_maker() as session:
         org = session.execute(select(Org).where(Org.id == org_id)).scalars().first()
         assert org is not None
-        assert org.agent_settings['llm']['model'] == 'anthropic/claude-sonnet-4'
-        assert org.agent_settings['llm']['base_url'] == 'https://api.anthropic.com/v1'
-        assert org.conversation_settings['max_iterations'] == 100
+        # The org default is NOT mutated by a member's personal save.
+        assert (org.agent_settings.get('llm') or {}).get(
+            'model'
+        ) != 'anthropic/claude-sonnet-4'
 
         members = {
             str(member.user_id): member
@@ -609,17 +612,23 @@ async def test_store_updates_org_defaults_and_all_members_for_shared_keys(
         }
         assert len(members) == 3
 
-        for member in members.values():
-            assert (
-                member.agent_settings_diff['llm']['model']
-                == 'anthropic/claude-sonnet-4'
-            )
-            assert (
-                member.agent_settings_diff['llm']['base_url']
-                == 'https://api.anthropic.com/v1'
-            )
-            assert member.conversation_settings_diff['max_iterations'] == 100
-            assert decrypt_value(member._llm_api_key) == 'shared-external-api-key'
+        # The acting member got their new settings + their external key.
+        acting = members[str(fixture['admin_user_id'])]
+        assert acting.agent_settings_diff['llm']['model'] == 'anthropic/claude-sonnet-4'
+        assert (
+            acting.agent_settings_diff['llm']['base_url']
+            == 'https://api.anthropic.com/v1'
+        )
+        assert acting.conversation_settings_diff['max_iterations'] == 100
+        assert decrypt_value(acting._llm_api_key) == 'shared-external-api-key'
+
+        # The other members are untouched — model and key unchanged.
+        m1 = members[str(fixture['member1_user_id'])]
+        assert m1.agent_settings_diff['llm']['model'] == 'old-model-v2'
+        assert decrypt_value(m1._llm_api_key) == 'member1-initial-key'
+        m2 = members[str(fixture['member2_user_id'])]
+        assert m2.agent_settings_diff['llm']['model'] == 'old-model-v3'
+        assert decrypt_value(m2._llm_api_key) == 'member2-initial-key'
 
 
 @pytest.mark.asyncio
@@ -657,12 +666,10 @@ async def test_store_keeps_openhands_managed_keys_member_specific(
     with session_maker() as session:
         org = session.execute(select(Org).where(Org.id == org_id)).scalars().first()
         assert org is not None
-        # Settings keeps the public openhands/ provider prefix in persisted data
-        assert (
-            org.agent_settings['llm']['model'] == 'openhands/claude-opus-4-5-20251101'
-        )
-        assert org.agent_settings['llm']['base_url'] == LITE_LLM_API_URL
-        assert org.conversation_settings['max_iterations'] == 75
+        # A member save does not write the org default.
+        assert (org.agent_settings.get('llm') or {}).get(
+            'model'
+        ) != 'openhands/claude-opus-4-5-20251101'
 
         members = {
             str(member.user_id): member
@@ -674,21 +681,22 @@ async def test_store_keeps_openhands_managed_keys_member_specific(
         }
         assert len(members) == 3
 
+        # The acting member got the managed model + their own managed key.
         admin_member = members[admin_user_id]
         assert decrypt_value(admin_member._llm_api_key) == 'admin-managed-api-key'
+        assert (
+            admin_member.agent_settings_diff['llm']['model']
+            == 'openhands/claude-opus-4-5-20251101'
+        )
+        assert admin_member.agent_settings_diff['llm']['base_url'] == LITE_LLM_API_URL
 
+        # Other members keep their OWN model + key — nothing is copied across.
         member1 = members[str(fixture['member1_user_id'])]
         member2 = members[str(fixture['member2_user_id'])]
         assert decrypt_value(member1._llm_api_key) == 'member1-initial-key'
         assert decrypt_value(member2._llm_api_key) == 'member2-initial-key'
-
-        for member in members.values():
-            assert (
-                member.agent_settings_diff['llm']['model']
-                == 'openhands/claude-opus-4-5-20251101'
-            )
-            assert member.agent_settings_diff['llm']['base_url'] == LITE_LLM_API_URL
-            assert member.conversation_settings_diff['max_iterations'] == 75
+        assert member1.agent_settings_diff['llm']['model'] == 'old-model-v2'
+        assert member2.agent_settings_diff['llm']['model'] == 'old-model-v3'
 
 
 @pytest.mark.asyncio
