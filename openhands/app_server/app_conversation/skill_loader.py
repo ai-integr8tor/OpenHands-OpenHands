@@ -139,9 +139,23 @@ async def _determine_org_repo_path(
         - org_name: Organization name extracted from repository
 
     Examples:
-        - GitHub/Bitbucket: ('owner/.openhands', 'owner')
+        - GitHub/Bitbucket: ('owner/.agents', 'owner')
         - GitLab: ('owner/openhands-config', 'owner')
         - Azure DevOps: ('org/openhands-config/openhands-config', 'org')
+    """
+    org_repo_paths, org_name = await _determine_org_repo_paths(
+        selected_repository, user_context
+    )
+    return org_repo_paths[0], org_name
+
+
+async def _determine_org_repo_paths(
+    selected_repository: str, user_context: UserContext
+) -> tuple[list[str], str]:
+    """Determine candidate organization config repository paths.
+
+    GitHub/Bitbucket org and user skills support the documented `.agents`
+    repository first, while preserving `.openhands` as a legacy fallback.
     """
     repo_parts = selected_repository.split('/')
 
@@ -156,13 +170,13 @@ async def _determine_org_repo_path(
         org_name = repo_parts[-2]
 
     if is_gitlab:
-        org_openhands_repo = f'{org_name}/openhands-config'
+        org_repos = [f'{org_name}/openhands-config']
     elif is_azure_devops:
-        org_openhands_repo = f'{org_name}/openhands-config/openhands-config'
+        org_repos = [f'{org_name}/openhands-config/openhands-config']
     else:
-        org_openhands_repo = f'{org_name}/.openhands'
+        org_repos = [f'{org_name}/.agents', f'{org_name}/.openhands']
 
-    return org_openhands_repo, org_name
+    return org_repos, org_name
 
 
 async def _get_org_repository_url(
@@ -219,11 +233,16 @@ async def build_org_config(
         return None
 
     try:
-        org_openhands_repo, org_name = await _determine_org_repo_path(
+        org_repos, org_name = await _determine_org_repo_paths(
             selected_repository, user_context
         )
 
-        org_repo_url = await _get_org_repository_url(org_openhands_repo, user_context)
+        org_repo_url = None
+        for org_repo in org_repos:
+            org_repo_url = await _get_org_repository_url(org_repo, user_context)
+            if org_repo_url:
+                break
+
         if not org_repo_url:
             return None
 
