@@ -7,13 +7,12 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from storage.base import Base
 
 if TYPE_CHECKING:
+    from storage.api_key_scope import ApiKeyScope
     from storage.org import Org
 
 
 class ApiKey(Base):
-    """
-    Represents an API key for a user.
-    """
+    """Represents an API key for a user."""
 
     __tablename__ = 'api_keys'
 
@@ -32,3 +31,6 @@ class ApiKey(Base):
 
     # Relationships
     org: Mapped['Org | None'] = relationship('Org', back_populates='api_keys')
+    scopes: Mapped[list['ApiKeyScope']] = relationship(
+        'ApiKeyScope', back_populates='api_key', cascade='all, delete-orphan'
+    )
