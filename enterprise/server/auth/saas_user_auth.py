@@ -218,6 +218,31 @@ class SaasUserAuth(UserAuth):
 
         # Case 1: API key binds the org.
         if self.api_key_org_id is not None:
+            # When personal workspaces are hidden, a key bound to one would
+            # silently operate in a workspace its owner can no longer see.
+            # Fail loudly instead; unhiding restores the key, matching how
+            # hiding treats all other personal-workspace data.
+            from storage.default_org_service import get_default_org_config
+
+            if (
+                str(self.api_key_org_id) == self.user_id
+                and get_default_org_config().hide_personal_workspaces
+            ):
+                logger.warning(
+                    'api_key_personal_workspace_hidden',
+                    extra={
+                        'user_id': self.user_id,
+                        'api_key_id': self.api_key_id,
+                    },
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=(
+                        'This API key belongs to your personal workspace, '
+                        'which is hidden on this instance. Create a new API '
+                        'key in your organization and use that instead.'
+                    ),
+                )
             if requested is not None and requested != self.api_key_org_id:
                 logger.warning(
                     'x_org_id_api_key_mismatch',

@@ -338,3 +338,53 @@ class TestGetEffectiveOrgId:
         second = await user_auth.get_effective_org_id()
         assert first == second == other_org_id
         assert user_auth._effective_org_id_resolved is True
+
+
+class TestPersonalApiKeyWhenPersonalWorkspacesHidden:
+    """API keys bound to a personal workspace fail loudly while hiding is on.
+
+    A personal-bound key would otherwise keep operating in a workspace its
+    owner can no longer see. Unhiding restores the key, matching how hiding
+    treats all other personal-workspace data.
+    """
+
+    @pytest.mark.asyncio
+    async def test_personal_key_blocked_when_hiding_on(self, user_id, monkeypatch):
+        monkeypatch.setenv('HIDE_PERSONAL_WORKSPACES', 'true')
+        user_auth = SaasUserAuth(
+            user_id=user_id,
+            refresh_token=SecretStr('mock'),
+            api_key_org_id=uuid.UUID(user_id),
+        )
+
+        with pytest.raises(HTTPException) as exc_info:
+            await user_auth.get_effective_org_id()
+
+        assert exc_info.value.status_code == 403
+        assert 'personal workspace' in exc_info.value.detail
+
+    @pytest.mark.asyncio
+    async def test_personal_key_allowed_when_hiding_off(self, user_id, monkeypatch):
+        monkeypatch.delenv('HIDE_PERSONAL_WORKSPACES', raising=False)
+        user_auth = SaasUserAuth(
+            user_id=user_id,
+            refresh_token=SecretStr('mock'),
+            api_key_org_id=uuid.UUID(user_id),
+        )
+
+        effective = await user_auth.get_effective_org_id()
+
+        assert effective == uuid.UUID(user_id)
+
+    @pytest.mark.asyncio
+    async def test_org_key_unaffected_by_hiding(self, user_id, org_id, monkeypatch):
+        monkeypatch.setenv('HIDE_PERSONAL_WORKSPACES', 'true')
+        user_auth = SaasUserAuth(
+            user_id=user_id,
+            refresh_token=SecretStr('mock'),
+            api_key_org_id=org_id,
+        )
+
+        effective = await user_auth.get_effective_org_id()
+
+        assert effective == org_id
