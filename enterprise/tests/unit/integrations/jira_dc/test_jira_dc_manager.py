@@ -872,6 +872,53 @@ class TestReceiveMessage:
             # Should return early without processing
 
     @pytest.mark.asyncio
+    async def test_receive_message_does_not_log_body_for_plain_label_substring(
+        self, jira_dc_manager
+    ):
+        payload = _jdc_comment_payload(
+            'Transferred from alona+jdcbot@openhands.dev for review'
+        )
+        message = Message(source=SourceType.JIRA_DC, message={'payload': payload})
+
+        with (
+            patch.object(
+                jira_dc_manager,
+                '_resolve_service_account_mentions',
+                AsyncMock(return_value=None),
+            ),
+            patch.object(jira_dc_manager, 'parse_webhook', return_value=None),
+            patch('integrations.jira_dc.jira_dc_manager.logger') as mock_logger,
+        ):
+            await jira_dc_manager.receive_message(message)
+
+        logged_args = [
+            arg for call in mock_logger.info.call_args_list for arg in call.args
+        ]
+        assert payload['comment']['body'] not in logged_args
+        assert '[Jira DC] Webhook does not match trigger conditions' in logged_args
+
+    @pytest.mark.asyncio
+    async def test_receive_message_logs_body_for_exact_bot_reference(
+        self, jira_dc_manager
+    ):
+        payload = _jdc_comment_payload('Please fix this @openhands')
+        message = Message(source=SourceType.JIRA_DC, message={'payload': payload})
+
+        with (
+            patch.object(
+                jira_dc_manager,
+                '_resolve_service_account_mentions',
+                AsyncMock(return_value=None),
+            ),
+            patch.object(jira_dc_manager, 'parse_webhook', return_value=None),
+            patch('integrations.jira_dc.jira_dc_manager.logger') as mock_logger,
+        ):
+            await jira_dc_manager.receive_message(message)
+
+        _, *log_args = mock_logger.info.call_args.args
+        assert log_args[-1] == payload['comment']['body']
+
+    @pytest.mark.asyncio
     async def test_receive_message_workspace_not_found(
         self, jira_dc_manager, sample_comment_webhook_payload
     ):

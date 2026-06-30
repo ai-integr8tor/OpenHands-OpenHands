@@ -80,6 +80,16 @@ _JIRA_MENTION_RE = re.compile(
 )
 
 
+def _matching_bot_mention_tokens(comment: str, bot_ids: set[str] | None) -> list[str]:
+    if not bot_ids:
+        return []
+    return [
+        m.group(1).strip()
+        for m in _JIRA_MENTION_RE.finditer(comment)
+        if m.group(1).strip().lower() in bot_ids
+    ]
+
+
 def _extract_workspace_url(payload: Dict) -> str:
     """Return a Jira URL whose host identifies the configured workspace."""
     for url in _extract_workspace_urls(payload):
@@ -130,12 +140,7 @@ def _comment_addresses_openhands(comment: str, bot_ids: set[str] | None) -> bool
     # someone@openhands.dev (incl. the service account's own address).
     if has_exact_mention(comment, INLINE_OH_LABEL):
         return True
-    if bot_ids:
-        return any(
-            m.group(1).strip().lower() in bot_ids
-            for m in _JIRA_MENTION_RE.finditer(comment)
-        )
-    return False
+    return bool(_matching_bot_mention_tokens(comment, bot_ids))
 
 
 class JiraDcManager(Manager[JiraDcViewInterface]):
@@ -396,22 +401,18 @@ class JiraDcManager(Manager[JiraDcViewInterface]):
         job_context = self.parse_webhook(payload, bot_mentions)
 
         if not job_context:
-            # Log the body only for a non-matching comment that references the
-            # bot itself (name 'openhands' or a resolved bot id) -- the FDE-84
-            # "mention didn't fire" case. Skips unrelated comments / mentions of
-            # other users on this instance-wide webhook. Truncated since bodies
-            # can hold sensitive content.
+            # Only log bodies that pass the same strict bot-reference check as triggering.
             comment = (payload.get('comment') or {}).get('body', '') or ''
-            lowered = comment.lower()
-            refs_bot = OH_LABEL in lowered or any(
-                i in lowered for i in (bot_mentions or ())
+            matching_tokens = _matching_bot_mention_tokens(comment, bot_mentions)
+            refs_bot = has_exact_mention(comment, INLINE_OH_LABEL) or bool(
+                matching_tokens
             )
             if payload.get('webhookEvent') == 'comment_created' and refs_bot:
                 logger.info(
                     '[Jira DC] comment references the bot but did not trigger '
                     '(bot_ids_resolved=%s mention_tokens=%s) body=%r',
                     bool(bot_mentions),
-                    _JIRA_MENTION_RE.findall(comment),
+                    matching_tokens,
                     comment[:500],
                 )
             else:
