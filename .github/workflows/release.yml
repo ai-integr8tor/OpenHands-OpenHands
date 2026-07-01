@@ -2,10 +2,11 @@ name: release
 
 # app (X.Y.Z, excludes enterprise/) and cloud (cloud-X.Y.Z) release lines.
 #
-# BOOTSTRAP: both configs set a top-level `last-release-sha` to bound the first
-# release's notes (the existing tags aren't reachable from main). Delete those
-# lines once each line's first release PR has merged — they cap every run, not
-# just the first.
+# BOOTSTRAP: a config sets a top-level `last-release-sha` to bound the first
+# release's notes (the existing tags aren't reachable from main). Delete that
+# line once the line's first release PR has merged — it caps every run, not
+# just the first. The cloud line is done; the app config still carries it until
+# its first release PR (#14747) merges.
 on:
   push:
     branches:
