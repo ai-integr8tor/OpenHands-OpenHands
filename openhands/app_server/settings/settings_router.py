@@ -10,7 +10,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Path, status
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from openhands.analytics import get_analytics_service
 from openhands.app_server.integrations.provider import (
@@ -255,6 +255,12 @@ async def store_settings(
         return JSONResponse(
             status_code=status.HTTP_200_OK,
             content={'message': 'Settings stored'},
+        )
+    except ValidationError as e:
+        logger.warning(f'Validation failed storing settings: {e}')
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            content={'error': f'Invalid settings: {e}'},
         )
     except Exception as e:
         logger.warning(f'Something went wrong storing settings: {e}')

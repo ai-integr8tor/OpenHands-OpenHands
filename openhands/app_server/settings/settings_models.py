@@ -27,7 +27,7 @@ from pydantic import (
 
 from openhands.app_server.integrations.provider import ProviderToken
 from openhands.app_server.integrations.service_types import ProviderType
-from openhands.app_server.settings.llm_profiles import LLMProfiles
+from openhands.app_server.settings.llm_profiles import LLMProfiles, StrictLLM
 from openhands.app_server.utils.jsonpatch_compat import deep_merge
 from openhands.sdk.settings import (
     ACPAgentSettings,
@@ -220,6 +220,10 @@ class Settings(BaseModel):
 
         agent_update = payload.get('agent_settings_diff')
         if isinstance(agent_update, dict):
+            llm_update = agent_update.get('llm')
+            if isinstance(llm_update, dict):
+                StrictLLM.model_validate(llm_update)
+
             coerced: dict[str, Any] = {}
             for key, value in agent_update.items():
                 coerced[key] = (

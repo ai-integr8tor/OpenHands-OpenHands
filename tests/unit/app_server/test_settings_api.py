@@ -328,3 +328,35 @@ async def test_disabled_skills_persistence(test_client):
     assert response.status_code == 200
     data = response.json()
     assert data['disabled_skills'] == []
+
+
+@pytest.mark.asyncio
+async def test_store_settings_forbids_is_subscription_and_unknown_fields(test_client):
+    # Valid payload should work
+    valid_payload = {
+        'agent_settings_diff': {
+            'llm': {'model': 'openai/gpt-4o', 'api_key': 'test-api-key'}
+        }
+    }
+    response = test_client.post('/api/v1/settings', json=valid_payload)
+    assert response.status_code == 200
+
+    # Payload with is_subscription should be forbidden (422)
+    invalid_payload_subscription = {
+        'agent_settings_diff': {
+            'llm': {'model': 'openai/gpt-4o', 'is_subscription': True}
+        }
+    }
+    response = test_client.post('/api/v1/settings', json=invalid_payload_subscription)
+    assert response.status_code == 422
+    assert 'is_subscription' in response.json()['error']
+
+    # Payload with unknown key should be forbidden (422)
+    invalid_payload_unknown = {
+        'agent_settings_diff': {
+            'llm': {'model': 'openai/gpt-4o', 'unknown_field_12345': 'value'}
+        }
+    }
+    response = test_client.post('/api/v1/settings', json=invalid_payload_unknown)
+    assert response.status_code == 422
+    assert 'unknown_field_12345' in response.json()['error']
