@@ -73,6 +73,10 @@ class SaasUserAuth(UserAuth):
     api_key_org_id: UUID | None = None  # Org bound to the API key used for auth
     api_key_id: int | None = None
     api_key_name: str | None = None
+    # Opaque, namespaced scope strings carried by the API/session key used for
+    # auth. None when not authenticated via an API key (e.g. cookie auth).
+    # ``[FULL_SCOPE]`` for keys without explicit scopes (legacy/back-compat).
+    api_key_scopes: list[str] | None = None
     # Organization context fields - populated lazily via get_org_info()
     _org_id: str | None = None
     _org_name: str | None = None
@@ -98,6 +102,16 @@ class SaasUserAuth(UserAuth):
             (cookie auth or legacy API keys without org binding).
         """
         return self.api_key_org_id
+
+    def get_api_key_scopes(self) -> list[str] | None:
+        """Get the opaque scope strings carried by the API key used for auth.
+
+        Returns:
+            The scope list when authenticated via an API/session key
+            (``[FULL_SCOPE]`` for keys without explicit scopes), or None for
+            non-API-key auth such as cookie sessions.
+        """
+        return self.api_key_scopes
 
     def set_effective_org_id_override(self, org_id: UUID | None) -> None:
         """Set a trusted server-side org override and clear org-scoped caches."""
@@ -764,6 +778,7 @@ async def saas_user_auth_from_bearer(request: Request) -> SaasUserAuth | None:
             api_key_org_id=validation_result.org_id,
             api_key_id=validation_result.key_id,
             api_key_name=validation_result.key_name,
+            api_key_scopes=validation_result.scopes,
         )
     except Exception as exc:
         raise BearerTokenError from exc

@@ -17,6 +17,11 @@ class SaasUserInfo(UserInfo):
     org_name: str | None = None
     role: str | None = None
     permissions: list[str] | None = None
+    # Opaque, namespaced scope strings carried by the API/session key used for
+    # this request. None for non-API-key (e.g. cookie) auth. Resource servers
+    # use this to enforce reduced-privilege credentials; OpenHands does not
+    # interpret the strings.
+    api_key_scopes: list[str] | None = None
 
 
 class GitOrganizationsResponse(BaseModel):

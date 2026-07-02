@@ -4,8 +4,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from sqlalchemy import select
-from storage.api_key import ApiKey
-from storage.api_key_store import ApiKeyStore, ApiKeyValidationResult
+from storage.api_key import ApiKey, ApiKeyScope
+from storage.api_key_store import (
+    FULL_SCOPE,
+    ApiKeyStore,
+    ApiKeyValidationResult,
+)
 
 
 @pytest.fixture
@@ -732,3 +736,125 @@ async def test_delete_api_key_by_name_not_found(api_key_store, async_session_mak
 
     # Verify
     assert result is False
+
+
+class TestApiKeyScopes:
+    """Tests for the Phase 1 scoped-credentials foundation."""
+
+    def test_normalize_scopes_empty(self, api_key_store):
+        """None/empty means no rows (implicit full scope)."""
+        assert api_key_store._normalize_scopes(None) == []
+        assert api_key_store._normalize_scopes([]) == []
+
+    def test_normalize_scopes_drops_full_sentinel(self, api_key_store):
+        """The reserved ``full`` sentinel is never stored as a row."""
+        assert api_key_store._normalize_scopes([FULL_SCOPE]) == []
+        assert api_key_store._normalize_scopes(
+            ['automation:kv:read:org', FULL_SCOPE]
+        ) == ['automation:kv:read:org']
+
+    def test_normalize_scopes_strips_and_dedupes(self, api_key_store):
+        """Whitespace is trimmed, blanks dropped, order-preserving dedupe."""
+        assert api_key_store._normalize_scopes(
+            ['  a:b ', 'a:b', '', '  ', 'c:d']
+        ) == ['a:b', 'c:d']
+
+    @pytest.mark.asyncio
+    async def test_create_api_key_with_scopes(
+        self, api_key_store, async_session_maker
+    ):
+        """Scopes passed at creation are persisted and returned on validation."""
+        user_id = str(uuid.uuid4())
+        org_id = uuid.uuid4()
+        scopes = ['automation:kv:read:org', 'automation:kv:write:org']
+
+        with patch('storage.api_key_store.a_session_maker', async_session_maker):
+            api_key = await api_key_store.create_api_key(
+                user_id, name='scoped', org_id=org_id, scopes=scopes
+            )
+            result = await api_key_store.validate_api_key(api_key)
+
+        assert isinstance(result, ApiKeyValidationResult)
+        assert sorted(result.scopes) == sorted(scopes)
+
+        # Rows exist in api_key_scopes
+        async with async_session_maker() as session:
+            key = (
+                await session.execute(select(ApiKey).filter(ApiKey.key == api_key))
+            ).scalars().first()
+            rows = (
+                await session.execute(
+                    select(ApiKeyScope.scope).filter(
+                        ApiKeyScope.api_key_id == key.id
+                    )
+                )
+            ).scalars().all()
+        assert sorted(rows) == sorted(scopes)
+
+    @pytest.mark.asyncio
+    async def test_create_api_key_without_scopes_defaults_to_full(
+        self, api_key_store, async_session_maker
+    ):
+        """A key without scopes carries implicit full scope and stores no rows."""
+        user_id = str(uuid.uuid4())
+        org_id = uuid.uuid4()
+
+        with patch('storage.api_key_store.a_session_maker', async_session_maker):
+            api_key = await api_key_store.create_api_key(
+                user_id, name='plain', org_id=org_id
+            )
+            result = await api_key_store.validate_api_key(api_key)
+
+        assert result.scopes == [FULL_SCOPE]
+
+        async with async_session_maker() as session:
+            key = (
+                await session.execute(select(ApiKey).filter(ApiKey.key == api_key))
+            ).scalars().first()
+            rows = (
+                await session.execute(
+                    select(ApiKeyScope).filter(ApiKeyScope.api_key_id == key.id)
+                )
+            ).scalars().all()
+        assert rows == []
+
+    @pytest.mark.asyncio
+    async def test_validate_legacy_key_returns_full_scope(
+        self, api_key_store, async_session_maker
+    ):
+        """A pre-existing key with no scope rows validates as full scope."""
+        api_key_value = 'legacy-key-no-scopes'
+        async with async_session_maker() as session:
+            session.add(
+                ApiKey(
+                    key=api_key_value,
+                    user_id=str(uuid.uuid4()),
+                    org_id=uuid.uuid4(),
+                    name='legacy',
+                    expires_at=None,
+                )
+            )
+            await session.commit()
+
+        with patch('storage.api_key_store.a_session_maker', async_session_maker):
+            result = await api_key_store.validate_api_key(api_key_value)
+
+        assert result is not None
+        assert result.scopes == [FULL_SCOPE]
+
+    @pytest.mark.asyncio
+    async def test_system_key_with_scopes(
+        self, api_key_store, async_session_maker
+    ):
+        """System (session) keys can be minted with reduced scopes."""
+        user_id = str(uuid.uuid4())
+        org_id = uuid.uuid4()
+        scopes = ['automation:kv:read:org']
+
+        with patch('storage.api_key_store.a_session_maker', async_session_maker):
+            api_key = await api_key_store.get_or_create_system_api_key(
+                user_id=user_id, org_id=org_id, name='sandbox', scopes=scopes
+            )
+            result = await api_key_store.validate_api_key(api_key)
+
+        assert result.scopes == scopes

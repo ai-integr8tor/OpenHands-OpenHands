@@ -90,6 +90,12 @@ async def get_current_user_saas(
     if org_info:
         user_info_data.update(org_info)
 
+    # Surface the scopes carried by the API/session key (if any) so resource
+    # servers can enforce reduced-privilege credentials.
+    api_key_scopes = _get_api_key_scopes_from_context(user_context)
+    if api_key_scopes is not None:
+        user_info_data['api_key_scopes'] = api_key_scopes
+
     user_info = SaasUserInfo(**user_info_data)
 
     if expose_secrets:
@@ -155,6 +161,22 @@ async def _get_org_info_from_context(user_context: UserContext) -> dict | None:
         user_auth = user_context.user_auth
         if isinstance(user_auth, SaasUserAuth):
             return await user_auth.get_org_info()
+    return None
+
+
+def _get_api_key_scopes_from_context(
+    user_context: UserContext,
+) -> list[str] | None:
+    """Extract the API key scopes from the user context if available.
+
+    Returns the scope list when the request authenticated via an API/session
+    key (``[FULL_SCOPE]`` for keys without explicit scopes), or None for
+    non-API-key auth such as cookie sessions.
+    """
+    if isinstance(user_context, AuthUserContext):
+        user_auth = user_context.user_auth
+        if isinstance(user_auth, SaasUserAuth):
+            return user_auth.get_api_key_scopes()
     return None
 
 

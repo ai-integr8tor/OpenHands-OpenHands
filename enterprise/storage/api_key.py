@@ -11,9 +11,7 @@ if TYPE_CHECKING:
 
 
 class ApiKey(Base):
-    """
-    Represents an API key for a user.
-    """
+    """Represents an API key for a user."""
 
     __tablename__ = 'api_keys'
 
@@ -33,3 +31,36 @@ class ApiKey(Base):
 
     # Relationships
     org: Mapped['Org | None'] = relationship('Org', back_populates='api_keys')
+    scopes: Mapped[list['ApiKeyScope']] = relationship(
+        'ApiKeyScope',
+        back_populates='api_key',
+        cascade='all, delete-orphan',
+        # Rely on the DB-level ``ON DELETE CASCADE`` (see migration) rather than
+        # loading children on parent delete, which would trigger blocking lazy
+        # IO under the async session.
+        passive_deletes=True,
+    )
+
+
+class ApiKeyScope(Base):
+    """An opaque, namespaced scope string attached to an API key.
+
+    OpenHands does not interpret scope strings; it stores them, returns them at
+    validation time, and leaves all semantic enforcement to the resource server
+    that owns the namespace (e.g. ``automation:kv:read:org``). A key with no
+    scope rows is treated as carrying the implicit ``full`` scope, preserving
+    backwards compatibility with keys minted before scopes existed.
+    """
+
+    __tablename__ = 'api_key_scopes'
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    api_key_id: Mapped[int] = mapped_column(
+        ForeignKey('api_keys.id', ondelete='CASCADE'),
+        nullable=False,
+        index=True,
+    )
+    scope: Mapped[str] = mapped_column(String(255), nullable=False)
+
+    # Relationships
+    api_key: Mapped['ApiKey'] = relationship('ApiKey', back_populates='scopes')

@@ -2,16 +2,23 @@ from __future__ import annotations
 
 import secrets
 import string
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from uuid import UUID
 
 from sqlalchemy import select, update
-from storage.api_key import ApiKey
+from sqlalchemy.ext.asyncio import AsyncSession
+from storage.api_key import ApiKey, ApiKeyScope
 from storage.database import a_session_maker
 from storage.user_store import UserStore
 
 from openhands.app_server.utils.logger import openhands_logger as logger
+
+# Implicit scope carried by keys that have no explicit scope rows. Storing no
+# rows (rather than a literal "full" row) keeps legacy keys unchanged and lets
+# `full` remain a reserved, OpenHands-owned sentinel rather than a grantable
+# namespaced scope.
+FULL_SCOPE = 'full'
 
 
 @dataclass
@@ -22,6 +29,10 @@ class ApiKeyValidationResult:
     org_id: UUID | None  # None for legacy API keys without org binding
     key_id: int
     key_name: str | None
+    # Opaque, namespaced scope strings attached to the key. Defaults to
+    # ``[FULL_SCOPE]`` for keys without explicit scopes (legacy + back-compat).
+    # OpenHands does not interpret these; resource servers enforce them.
+    scopes: list[str] = field(default_factory=lambda: [FULL_SCOPE])
 
 
 def _as_naive(value: datetime | None) -> datetime | None:
@@ -74,6 +85,44 @@ class ApiKeyStore:
         """
         return f'{cls.SYSTEM_KEY_NAME_PREFIX}{name}'
 
+    @staticmethod
+    def _normalize_scopes(scopes: list[str] | None) -> list[str]:
+        """Normalize a requested scope list into rows to persist.
+
+        - ``None`` or empty -> ``[]`` (no rows; key carries the implicit
+          ``full`` scope, preserving legacy behavior).
+        - The reserved ``full`` sentinel is dropped: a fully-privileged key is
+          represented by the *absence* of scope rows, not by a ``full`` row.
+        - Duplicates are removed while preserving order.
+        """
+        if not scopes:
+            return []
+        normalized: list[str] = []
+        for raw in scopes:
+            scope = raw.strip()
+            if not scope or scope == FULL_SCOPE:
+                continue
+            if scope not in normalized:
+                normalized.append(scope)
+        return normalized
+
+    @staticmethod
+    async def _add_scope_rows(
+        session: AsyncSession, api_key_id: int, scopes: list[str]
+    ) -> None:
+        """Persist normalized scope rows for a key within an open session."""
+        for scope in scopes:
+            session.add(ApiKeyScope(api_key_id=api_key_id, scope=scope))
+
+    @staticmethod
+    async def _load_scopes(session: AsyncSession, api_key_id: int) -> list[str]:
+        """Load scope strings for a key, defaulting to ``[FULL_SCOPE]``."""
+        result = await session.execute(
+            select(ApiKeyScope.scope).filter(ApiKeyScope.api_key_id == api_key_id)
+        )
+        scopes = list(result.scalars().all())
+        return scopes if scopes else [FULL_SCOPE]
+
     async def create_api_key(
         self,
         user_id: str,
@@ -81,6 +130,7 @@ class ApiKeyStore:
         expires_at: datetime | None = None,
         not_before: datetime | None = None,
         org_id: UUID | None = None,
+        scopes: list[str] | None = None,
     ) -> str:
         """Create a new API key for a user.
 
@@ -96,6 +146,10 @@ class ApiKeyStore:
                 to the user's persisted ``current_org_id``. Callers in
                 request context should pass the effective org id (see
                 ``SaasUserAuth.get_effective_org_id``).
+            scopes: Optional opaque, namespaced scope strings to attach to the
+                key. When omitted/empty the key carries the implicit ``full``
+                scope (no behavior change). OpenHands stores these verbatim and
+                does not interpret them; resource servers enforce meaning.
 
         Returns:
             The generated API key
@@ -111,6 +165,8 @@ class ApiKeyStore:
         expires_at = _as_naive(expires_at)
         not_before = _as_naive(not_before)
 
+        normalized_scopes = self._normalize_scopes(scopes)
+
         async with a_session_maker() as session:
             key_record = ApiKey(
                 key=api_key,
@@ -121,6 +177,8 @@ class ApiKeyStore:
                 expires_at=expires_at,
             )
             session.add(key_record)
+            await session.flush()
+            await self._add_scope_rows(session, key_record.id, normalized_scopes)
             await session.commit()
 
         return api_key
@@ -130,6 +188,7 @@ class ApiKeyStore:
         user_id: str,
         org_id: UUID,
         name: str,
+        scopes: list[str] | None = None,
     ) -> str:
         """Get or create a system API key for a user on behalf of an internal service.
 
@@ -146,12 +205,17 @@ class ApiKeyStore:
             user_id: The ID of the user to create the key for
             org_id: The organization ID to associate the key with
             name: Required name for the key (will be prefixed with __SYSTEM__:)
+            scopes: Optional opaque, namespaced scope strings attached only when
+                a *new* key is minted. Omitted/empty means the implicit ``full``
+                scope (no behavior change). Scopes of an already-existing,
+                non-expired key are left untouched.
 
         Returns:
             The API key (existing or newly created)
         """
         # Create system key name with prefix
         system_key_name = self.make_system_key_name(name)
+        normalized_scopes = self._normalize_scopes(scopes)
 
         async with a_session_maker() as session:
             # Check if key already exists for this user/org/name
@@ -217,6 +281,8 @@ class ApiKeyStore:
                 expires_at=None,  # System keys never expire
             )
             session.add(key_record)
+            await session.flush()
+            await self._add_scope_rows(session, key_record.id, normalized_scopes)
             await session.commit()
 
         logger.info(
@@ -270,6 +336,8 @@ class ApiKeyStore:
                 .where(ApiKey.id == key_record.id)
                 .values(last_used_at=_as_naive(now))
             )
+
+            scopes = await self._load_scopes(session, key_record.id)
             await session.commit()
 
             return ApiKeyValidationResult(
@@ -277,6 +345,7 @@ class ApiKeyStore:
                 org_id=key_record.org_id,
                 key_id=key_record.id,
                 key_name=key_record.name,
+                scopes=scopes,
             )
 
     async def delete_api_key(self, api_key: str) -> bool:
