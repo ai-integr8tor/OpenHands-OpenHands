@@ -94,7 +94,6 @@ async def update_email(
             keycloak_access_token=user_auth.access_token.get_secret_value(),
             keycloak_refresh_token=user_auth.refresh_token.get_secret_value(),
             secure=not IS_LOCAL_ENV,
-            accepted_tos=user_auth.accepted_tos or False,
         )
 
         await verify_email(request=request, user_id=user_id)
@@ -178,7 +177,6 @@ async def verified_email(request: Request):
         keycloak_access_token=user_auth.access_token.get_secret_value(),
         keycloak_refresh_token=user_auth.refresh_token.get_secret_value(),
         secure=False if request.url.hostname == 'localhost' else True,
-        accepted_tos=user_auth.accepted_tos or False,
     )
 
     logger.info(f'Email {user_auth.email} verified.')

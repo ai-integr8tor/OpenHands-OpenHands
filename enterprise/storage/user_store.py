@@ -709,6 +709,29 @@ class UserStore:
             return user_settings
 
     @staticmethod
+    async def get_user_accepted_tos(user_id: str) -> bool | None:
+        """Lightweight check for ``User.accepted_tos``.
+
+        Returns ``True`` if the user has accepted the TOS, ``False`` if the
+        row exists and ``accepted_tos`` is still ``NULL``, and ``None`` if
+        no user with that id exists. Avoids the eager load and legacy
+        migration fallback in :meth:`get_user_by_id` so it's cheap enough
+        to call on every authenticated request.
+        """
+        try:
+            user_uuid = uuid.UUID(user_id)
+        except ValueError:
+            return None
+        async with a_session_maker() as session:
+            result = await session.execute(
+                select(User.id, User.accepted_tos).filter(User.id == user_uuid)
+            )
+            row = result.first()
+            if row is None:
+                return None
+            return row.accepted_tos is not None
+
+    @staticmethod
     async def get_user_by_id(user_id: str) -> Optional[User]:
         """Get user by Keycloak user ID."""
         async with a_session_maker() as session:

@@ -782,6 +782,7 @@ async def saas_user_auth_from_cookie(request: Request) -> SaasUserAuth | None:
 async def saas_user_auth_from_signed_token(signed_token: str) -> SaasUserAuth:
     logger.debug('saas_user_auth_from_signed_token')
     from storage.encrypt_utils import get_jwt_service
+    from storage.user_store import UserStore
 
     decoded = get_jwt_service().verify_jws_token(signed_token)
     logger.debug('saas_user_auth_from_signed_token:decoded')
@@ -794,7 +795,6 @@ async def saas_user_auth_from_signed_token(signed_token: str) -> SaasUserAuth:
             'refresh_token': refresh_token,
         },
     )
-    accepted_tos = decoded.get('accepted_tos')
 
     # The access token was encoded using HS256 on keycloak. Since we signed it, we can trust is was
     # created by us. So we can grab the user_id and expiration from it without going back to keycloak.
@@ -802,6 +802,12 @@ async def saas_user_auth_from_signed_token(signed_token: str) -> SaasUserAuth:
     user_id = access_token_payload['sub']
     email = access_token_payload['email']
     email_verified = access_token_payload['email_verified']
+
+    # ``accepted_tos`` is no longer carried in the cookie (the JWS payload
+    # only contains the Keycloak access/refresh tokens). Source it from
+    # ``User.accepted_tos`` so the rest of the request lifecycle can keep
+    # treating ``SaasUserAuth.accepted_tos`` as a tri-state bool.
+    accepted_tos = await UserStore.get_user_accepted_tos(user_id)
 
     # Check if email is blacklisted (whitelist takes precedence)
     if email:

@@ -101,13 +101,11 @@ def set_response_cookie(
     keycloak_access_token: str,
     keycloak_refresh_token: str,
     secure: bool = True,
-    accepted_tos: bool = False,
 ):
     # Create a signed JWT token
     cookie_data = {
         'access_token': keycloak_access_token,
         'refresh_token': keycloak_refresh_token,
-        'accepted_tos': accepted_tos,
     }
     from storage.encrypt_utils import get_jwt_service
 
@@ -641,7 +639,6 @@ async def keycloak_callback(
         keycloak_access_token=keycloak_access_token,
         keycloak_refresh_token=keycloak_refresh_token,
         secure=True if web_url.startswith('https') else False,
-        accepted_tos=has_accepted_tos,
     )
 
     # Sync GitLab repos & set up webhooks
@@ -970,7 +967,6 @@ async def accept_tos(request: Request):
         keycloak_access_token=access_token.get_secret_value(),
         keycloak_refresh_token=refresh_token.get_secret_value(),
         secure=True if web_url.startswith('https') else False,
-        accepted_tos=True,
     )
     return response
 

@@ -494,6 +494,71 @@ async def test_get_user_by_id_user_not_found(async_session_maker):
     assert result is None
 
 
+# --- Tests for get_user_accepted_tos ---
+
+
+@pytest.mark.asyncio
+async def test_get_user_accepted_tos_user_accepted(async_session_maker):
+    """User with a non-null ``accepted_tos`` should report accepted."""
+    from datetime import datetime
+
+    user_id = uuid.uuid4()
+    org_id = uuid.uuid4()
+
+    async with async_session_maker() as session:
+        session.add(Org(id=org_id, name='test-org'))
+        session.add(
+            User(
+                id=user_id,
+                current_org_id=org_id,
+                accepted_tos=datetime(2024, 1, 1, 0, 0, 0),
+            )
+        )
+        await session.commit()
+
+    with patch('storage.user_store.a_session_maker', async_session_maker):
+        result = await UserStore.get_user_accepted_tos(str(user_id))
+
+    assert result is True
+
+
+@pytest.mark.asyncio
+async def test_get_user_accepted_tos_user_not_accepted(async_session_maker):
+    """User row exists but ``accepted_tos`` is still NULL → not accepted."""
+    user_id = uuid.uuid4()
+    org_id = uuid.uuid4()
+
+    async with async_session_maker() as session:
+        session.add(Org(id=org_id, name='test-org'))
+        session.add(User(id=user_id, current_org_id=org_id, accepted_tos=None))
+        await session.commit()
+
+    with patch('storage.user_store.a_session_maker', async_session_maker):
+        result = await UserStore.get_user_accepted_tos(str(user_id))
+
+    assert result is False
+
+
+@pytest.mark.asyncio
+async def test_get_user_accepted_tos_user_not_found(async_session_maker):
+    """Missing user row → ``None`` so callers can decide on a fallback."""
+    non_existent_id = str(uuid.uuid4())
+
+    with patch('storage.user_store.a_session_maker', async_session_maker):
+        result = await UserStore.get_user_accepted_tos(non_existent_id)
+
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_get_user_accepted_tos_invalid_uuid(async_session_maker):
+    """Malformed user id returns ``None`` instead of raising."""
+    with patch('storage.user_store.a_session_maker', async_session_maker):
+        result = await UserStore.get_user_accepted_tos('not-a-uuid')
+
+    assert result is None
+
+
 # --- Tests for get_user_by_email ---
 
 
@@ -991,6 +1056,8 @@ def test_get_org_kwargs_for_migration_preserves_existing_llm_when_not_custom():
 
 
 def test_get_org_kwargs_for_migration_uses_minimal_org_defaults_for_custom_llm():
+    # Use the SDK's current schema version - migration logic should always
+    # output settings matching the SDK's expected schema, regardless of input version
     from server.constants import (
         LITE_LLM_API_URL,
         ORG_SETTINGS_VERSION,
@@ -998,8 +1065,6 @@ def test_get_org_kwargs_for_migration_uses_minimal_org_defaults_for_custom_llm()
     )
     from storage.user_settings import UserSettings
 
-    # Use the SDK's current schema version - migration logic should always
-    # output settings matching the SDK's expected schema, regardless of input version
     from openhands.sdk.settings import AGENT_SETTINGS_SCHEMA_VERSION
 
     user_settings = UserSettings(

@@ -19,11 +19,27 @@ from openhands.app_server.user_auth.user_auth import AuthType
 
 
 @contextmanager
-def _mock_jwt_decode(accepted_tos: bool = True):
-    """Patch get_jwt_service so verify_jws_token returns a controlled payload."""
+def _mock_jwt_decode(accepted_tos: bool = True, sub: str = 'mock-user-id'):
+    """Patch the auth dependencies the middleware reads from the cookie.
+
+    The cookie payload no longer carries ``accepted_tos``; the keyword is
+    kept so the call sites read naturally. The value is looked up via the
+    patched ``UserStore.get_user_accepted_tos`` instead, which is what
+    the production code now consults.
+    """
     mock_svc = MagicMock()
-    mock_svc.verify_jws_token.return_value = {'accepted_tos': accepted_tos}
-    with patch('storage.encrypt_utils.get_jwt_service', return_value=mock_svc):
+    mock_svc.verify_jws_token.return_value = {
+        'access_token': 'mock-access-token',
+        'refresh_token': 'mock-refresh-token',
+        'sub': sub,
+    }
+    with (
+        patch('storage.encrypt_utils.get_jwt_service', return_value=mock_svc),
+        patch(
+            'storage.user_store.UserStore.get_user_accepted_tos',
+            new=AsyncMock(return_value=accepted_tos),
+        ),
+    ):
         yield mock_svc
 
 
@@ -112,13 +128,14 @@ async def test_middleware_with_cookie_and_refresh(
 
             assert result == mock_response
             mock_call_next.assert_called_once_with(mock_request)
+            # ``accepted_tos`` is no longer carried in the cookie; the
+            # middleware omits it from the ``set_response_cookie`` call.
             mock_set_cookie.assert_called_once_with(
                 request=mock_request,
                 response=mock_response,
                 keycloak_access_token='new_access_token',
                 keycloak_refresh_token='new_refresh_token',
                 secure=True,
-                accepted_tos=True,
             )
 
 

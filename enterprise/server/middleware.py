@@ -32,7 +32,7 @@ class SetAuthCookieMiddleware:
         logger.debug('request_with_cookie', extra={'cookie': keycloak_auth_cookie})
         try:
             if self._should_attach(request):
-                self._check_tos(request)
+                await self._check_tos(request)
 
             response: Response = await call_next(request)
             if not keycloak_auth_cookie:
@@ -49,7 +49,6 @@ class SetAuthCookieMiddleware:
                     keycloak_access_token=user_auth.access_token.get_secret_value(),
                     keycloak_refresh_token=user_auth.refresh_token.get_secret_value(),
                     secure=False if request.url.hostname == 'localhost' else True,
-                    accepted_tos=user_auth.accepted_tos or False,
                 )
 
                 # On re-authentication (token refresh), kick off background sync for GitLab repos
@@ -112,12 +111,11 @@ class SetAuthCookieMiddleware:
             return None
         return cast(SaasUserAuth, user_auth)
 
-    def _check_tos(self, request: Request):
+    async def _check_tos(self, request: Request):
         keycloak_auth_cookie = read_chunked_cookie(request, 'keycloak_auth')
         auth_header = request.headers.get('Authorization')
         mcp_auth_header = request.headers.get('X-Session-API-Key')
         api_auth_header = request.headers.get('X-Access-Token')
-        accepted_tos: bool | None = False
         if (
             keycloak_auth_cookie is None
             and (auth_header is None or not auth_header.startswith('Bearer '))
@@ -127,35 +125,65 @@ class SetAuthCookieMiddleware:
             raise NoCredentialsError
 
         if keycloak_auth_cookie:
+            # The cookie's signed payload no longer carries ``accepted_tos``;
+            # the value lives in ``User.accepted_tos`` and is sourced on the
+            # request path below. We still verify the JWS so a malformed or
+            # tampered cookie is rejected before any DB lookup.
             try:
                 from storage.encrypt_utils import get_jwt_service
 
-                decoded = get_jwt_service().verify_jws_token(keycloak_auth_cookie)
-                accepted_tos = decoded.get('accepted_tos')
+                get_jwt_service().verify_jws_token(keycloak_auth_cookie)
             except (jwt.InvalidTokenError, ValueError):
                 logger.warning('Invalid JWT signature detected')
                 raise AuthError('Invalid authentication token')
             except Exception as e:
                 logger.warning(f'JWT decode error: {str(e)}')
                 raise AuthError('Invalid authentication token')
+
+            accepted_tos = await self._resolve_accepted_tos(
+                request, keycloak_auth_cookie
+            )
         else:
             # Don't fail an API call if the TOS has not been accepted.
             # The user will accept the TOS the next time they login.
             accepted_tos = True
 
-        # TODO: This explicitly checks for "False" so it doesn't logout anyone
-        # that has logged in prior to this change:
-        # accepted_tos is "None" means the user has not re-logged in since this TOS change.
-        # accepted_tos is "False" means the user was shown the TOS but has not accepted.
-        # accepted_tos is "True" means the user has accepted the TOS
-        #
-        # Once the initial deploy is complete and every user has been logged out
-        # after this change (12 hrs max), this should be changed to check
-        # "if accepted_tos is not None" as there should not be any users with
-        # accepted_tos equal to "None"
         if accepted_tos is False and request.url.path != '/api/accept_tos':
             logger.warning('User has not accepted the terms of service')
             raise TosNotAcceptedError
+
+    @staticmethod
+    async def _resolve_accepted_tos(request: Request, signed_token: str) -> bool:
+        """Return whether the cookie's user has accepted the TOS.
+
+        Decodes the signed token to extract the Keycloak ``sub`` claim and
+        looks it up in the local ``User`` table. ``User.accepted_tos`` is
+        the source of truth; the cookie no longer carries it. Returns
+        ``True`` (allow) if the user row cannot be found, since the
+        legacy fallback for the pre-DB-lookup behaviour was to allow
+        through and let the next login settle the TOS state.
+        """
+        import jwt as _jwt
+        from storage.user_store import UserStore
+
+        try:
+            payload = _jwt.decode(signed_token, options={'verify_signature': False})
+        except _jwt.DecodeError:
+            return True
+        user_id = payload.get('sub')
+        if not user_id:
+            return True
+
+        try:
+            accepted = await UserStore.get_user_accepted_tos(user_id)
+        except Exception as e:
+            logger.warning(
+                'accepted_tos_lookup_failed',
+                extra={'user_id': user_id, 'error': str(e)},
+            )
+            return True
+        # None == user row missing (legacy/edge case). Default to allow.
+        return True if accepted is None else accepted
 
     def _should_attach(self, request: Request) -> bool:
         if request.method == 'OPTIONS':

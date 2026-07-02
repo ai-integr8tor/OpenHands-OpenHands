@@ -77,7 +77,6 @@ def test_set_response_cookie(mock_response, mock_request):
             keycloak_access_token='test_access_token',
             keycloak_refresh_token='test_refresh_token',
             secure=True,
-            accepted_tos=True,
         )
 
         mock_response.set_cookie.assert_called_once()
@@ -90,11 +89,13 @@ def test_set_response_cookie(mock_response, mock_request):
         assert kwargs['samesite'] == 'strict'
         assert kwargs['domain'] == 'example.com'
 
-        # Verify the JWT token contains the correct data
+        # Verify the JWT token contains the correct data. ``accepted_tos``
+        # is no longer carried in the cookie -- the source of truth is
+        # ``User.accepted_tos`` in the database.
         token_data = jwt_svc.verify_jws_token(kwargs['value'])
         assert token_data['access_token'] == 'test_access_token'
         assert token_data['refresh_token'] == 'test_refresh_token'
-        assert token_data['accepted_tos'] is True
+        assert 'accepted_tos' not in token_data
 
 
 @pytest.mark.asyncio
@@ -278,7 +279,6 @@ async def test_keycloak_callback_success_with_valid_offline_token(
             keycloak_access_token='test_access_token',
             keycloak_refresh_token='test_refresh_token',
             secure=False,
-            accepted_tos=True,
         )
 
         # Verify background task was scheduled and execute it to test analytics
@@ -587,7 +587,6 @@ async def test_keycloak_callback_success_without_offline_token(
             keycloak_access_token='test_access_token',
             keycloak_refresh_token='test_refresh_token',
             secure=False,
-            accepted_tos=True,
         )
 
         # Verify background task was scheduled and execute it to test analytics
@@ -691,7 +690,7 @@ async def test_keycloak_callback_redirects_to_keycloak_when_offline_token_invali
 
         # Cookie should be set with accepted_tos=True (user has accepted TOS)
         mock_set_cookie.assert_called_once()
-        assert mock_set_cookie.call_args[1]['accepted_tos'] is True
+        assert 'accepted_tos' not in mock_set_cookie.call_args[1]
 
         # Invitation service should NOT be called (early return before invitation processing)
         mock_invitation_service.accept_invitation.assert_not_called()
