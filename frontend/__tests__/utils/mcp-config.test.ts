@@ -53,6 +53,26 @@ describe("parseMcpConfig", () => {
     });
   });
 
+  it("should parse timeout for SSE servers", () => {
+    const input = {
+      mcpServers: {
+        "sse-timeout-server": {
+          url: "https://example.com/sse",
+          transport: "sse",
+          timeout: 90,
+        },
+      },
+    };
+
+    const result = parseMcpConfig(input);
+
+    expect(result.sse_servers[0]).toEqual({
+      name: "sse-timeout-server",
+      url: "https://example.com/sse",
+      timeout: 90,
+    });
+  });
+
   it("should preserve server names for shttp servers", () => {
     const input = {
       mcpServers: {
@@ -129,7 +149,9 @@ describe("parseMcpConfig", () => {
       name: "oauth-server",
       url: "https://example.com",
     });
-    expect((result.sse_servers[0] as { api_key?: string }).api_key).toBeUndefined();
+    expect(
+      (result.sse_servers[0] as { api_key?: string }).api_key,
+    ).toBeUndefined();
   });
 
   it("should parse timeout for shttp servers", () => {
@@ -218,9 +240,9 @@ describe("toSdkMcpConfig", () => {
     expect(result?.mcpServers).toHaveProperty("sse");
     expect(result?.mcpServers).toHaveProperty("sse_1");
     expect(result?.mcpServers).toHaveProperty("sse_2");
-    expect(result?.mcpServers["sse"].url).toBe("https://example1.com");
-    expect(result?.mcpServers["sse_1"].url).toBe("https://example2.com");
-    expect(result?.mcpServers["sse_2"].url).toBe("https://example3.com");
+    expect(result?.mcpServers.sse.url).toBe("https://example1.com");
+    expect(result?.mcpServers.sse_1.url).toBe("https://example2.com");
+    expect(result?.mcpServers.sse_2.url).toBe("https://example3.com");
   });
 
   it("should serialize api_key as an Authorization bearer header", () => {
@@ -232,20 +254,42 @@ describe("toSdkMcpConfig", () => {
       ],
       stdio_servers: [],
       shttp_servers: [
-        { name: "shttp", url: "https://shttp.example", api_key: "shttp-secret" },
+        {
+          name: "shttp",
+          url: "https://shttp.example",
+          api_key: "shttp-secret",
+        },
       ],
     };
 
     const result = toSdkMcpConfig(config);
 
-    expect(result?.mcpServers["secure"]).toEqual({
+    expect(result?.mcpServers.secure).toEqual({
       url: "https://example.com",
       transport: "sse",
       headers: { Authorization: "Bearer my-secret" },
     });
-    expect(result?.mcpServers["shttp"]).toEqual({
+    expect(result?.mcpServers.shttp).toEqual({
       url: "https://shttp.example",
       headers: { Authorization: "Bearer shttp-secret" },
+    });
+  });
+
+  it("should include timeout for sse servers", () => {
+    const config: MCPConfig = {
+      sse_servers: [
+        { name: "sse-timeout", url: "https://example.com/sse", timeout: 90 },
+      ],
+      stdio_servers: [],
+      shttp_servers: [],
+    };
+
+    const result = toSdkMcpConfig(config);
+
+    expect(result?.mcpServers["sse-timeout"]).toEqual({
+      url: "https://example.com/sse",
+      timeout: 90,
+      transport: "sse",
     });
   });
 
@@ -301,7 +345,7 @@ describe("toSdkMcpConfig", () => {
 
     const result = toSdkMcpConfig(config);
 
-    expect(result?.mcpServers["timeout"]).toEqual({
+    expect(result?.mcpServers.timeout).toEqual({
       url: "https://example.com",
       timeout: 60,
     });

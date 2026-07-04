@@ -54,6 +54,7 @@ export function useUpdateMcpServer() {
         const sseServer: MCPSSEServer = {
           url: server.url!,
           ...(server.api_key && { api_key: server.api_key }),
+          ...(server.timeout !== undefined && { timeout: server.timeout }),
         };
         newConfig.sse_servers[index] = sseServer;
       } else if (serverType === "stdio") {
