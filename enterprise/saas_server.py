@@ -58,6 +58,7 @@ from server.routes.user_app_settings import user_app_settings_router  # noqa: E4
 from server.routes.user_provisioning import (  # noqa: E402
     user_provisioning_router,
 )
+from server.routes.mcp_oauth import mcp_oauth_router  # noqa: E402
 from server.routes.users_v1 import (  # noqa: E402
     override_users_me_endpoint,
 )
@@ -95,6 +96,7 @@ base_app.include_router(
 )  # Add routes for credit management and Stripe payment integration
 base_app.include_router(shared_conversation_router)
 base_app.include_router(shared_event_router)
+base_app.include_router(mcp_oauth_router)
 
 # Add GitHub integration router only if GITHUB_APP_CLIENT_ID is set
 if GITHUB_APP_CLIENT_ID:

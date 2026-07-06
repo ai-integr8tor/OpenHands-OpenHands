@@ -9,7 +9,7 @@ from server.constants import DEFAULT_BILLING_MARGIN
 from sqlalchemy import JSON, DateTime, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from storage.base import Base
-from storage.encrypt_utils import EncryptedJSON, decrypt_value, encrypt_value
+from storage.encrypt_utils import EncryptedJSON, SecretAwareJSON, decrypt_value, encrypt_value
 
 from openhands.app_server.settings.settings_models import MarketplaceRegistration
 
@@ -51,7 +51,7 @@ class Org(Base):
     )
     org_version: Mapped[int] = mapped_column(nullable=False, default=0)
     agent_settings: Mapped[dict[str, Any]] = mapped_column(
-        JSON, nullable=False, default=dict
+        SecretAwareJSON, nullable=False, default=dict
     )
     conversation_settings: Mapped[dict[str, Any]] = mapped_column(
         JSON, nullable=False, default=dict

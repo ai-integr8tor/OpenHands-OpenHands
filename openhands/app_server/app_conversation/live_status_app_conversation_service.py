@@ -1286,7 +1286,63 @@ class LiveStatusAppConversationService(AppConversationServiceBase):
         if mcp_api_key:
             mcp_servers['default']['headers']['X-Session-API-Key'] = mcp_api_key
 
-    def _merge_custom_mcp_config(
+    async def _refresh_oauth_tokens(
+        self,
+        url: str,
+        transport_type: str,
+        tokens: dict,
+        client_info: dict,
+    ) -> dict | None:
+        """Refresh OAuth tokens using FastMCP Client's built-in refresh mechanism."""
+        try:
+            from fastmcp import Client
+            from fastmcp.client.auth.oauth import OAuth
+            from fastmcp.client.transports.http import StreamableHttpTransport
+            from fastmcp.client.transports.sse import SSETransport
+            from key_value.aio.stores.memory import MemoryStore
+            from mcp.shared.auth import OAuthToken
+
+            transport = (
+                SSETransport(url=url)
+                if transport_type == 'sse'
+                else StreamableHttpTransport(url=url)
+            )
+
+            token_storage = MemoryStore()
+            provider = OAuth(
+                mcp_url=url,
+                token_storage=token_storage,
+                client_id=client_info.get('client_id'),
+                client_secret=client_info.get('client_secret'),
+            )
+
+            tokens_obj = OAuthToken(**tokens)
+            await provider.token_storage_adapter.set_tokens(tokens_obj)
+
+            client = Client(
+                transport=transport,
+                auth=provider,
+                auto_initialize=True,
+            )
+
+            # Connect to trigger auto-refresh if expired
+            async with client:
+                refreshed_tokens = await provider.token_storage_adapter.get_tokens()
+                if refreshed_tokens:
+                    return {
+                        'tokens': {
+                            'access_token': refreshed_tokens.access_token,
+                            'refresh_token': refreshed_tokens.refresh_token,
+                            'expires_in': refreshed_tokens.expires_in,
+                            'token_type': refreshed_tokens.token_type,
+                            'scope': refreshed_tokens.scope,
+                        }
+                    }
+        except Exception as e:
+            _logger.warning(f'Failed to refresh OAuth tokens for {url}: {e}')
+        return None
+
+    async def _merge_custom_mcp_config(
         self, mcp_servers: dict[str, Any], user: UserInfo
     ) -> None:
         """Merge custom MCP configuration from user settings.
@@ -1308,8 +1364,106 @@ class LiveStatusAppConversationService(AppConversationServiceBase):
                 f'Loading custom MCP config from user settings: {count} servers'
             )
 
+            settings_updated = False
+            updated_mcp_config = None
+
             for name, server in sdk_mcp.mcpServers.items():
-                mcp_servers[name] = server.model_dump(exclude_none=True)
+                server_dict = server.model_dump(exclude_none=True)
+
+                mcp_url = server_dict.get('url')
+                oauth_creds = server_dict.get('oauth_credentials')
+                if (
+                    isinstance(mcp_url, str)
+                    and server_dict.get('auth') == 'oauth'
+                    and oauth_creds
+                ):
+                    try:
+                        from storage.encrypt_utils import get_cipher
+
+                        cipher = get_cipher()
+                    except ImportError:
+                        cipher = None
+
+                    if cipher and isinstance(oauth_creds, str):
+                        decrypted = cipher.try_decrypt_str(oauth_creds)
+                        if decrypted:
+                            try:
+                                creds_dict = json.loads(decrypted)
+                                tokens = creds_dict.get('tokens', {})
+                                client_info = creds_dict.get('client_info', {})
+
+                                access_token = tokens.get('access_token')
+                                tokens.get('refresh_token')
+
+                                refreshed = await self._refresh_oauth_tokens(
+                                    url=mcp_url,
+                                    transport_type=server_dict.get('transport', 'sse'),
+                                    tokens=tokens,
+                                    client_info=client_info,
+                                )
+                                if refreshed:
+                                    tokens = refreshed.get('tokens', tokens)
+                                    access_token = tokens.get(
+                                        'access_token', access_token
+                                    )
+
+                                    if tokens.get('access_token') != creds_dict.get(
+                                        'tokens', {}
+                                    ).get('access_token'):
+                                        creds_dict['tokens'] = tokens
+                                        new_encrypted = cipher.encrypt(
+                                            SecretStr(json.dumps(creds_dict))
+                                        )
+
+                                        if updated_mcp_config is None:
+                                            from openhands.app_server.shared import (
+                                                SettingsStoreImpl,
+                                            )
+
+                                            settings_store = (
+                                                await SettingsStoreImpl.get_instance(
+                                                    user.id
+                                                )
+                                            )
+                                            db_settings = await settings_store.load()
+                                            if (
+                                                db_settings
+                                                and db_settings.agent_settings.mcp_config
+                                            ):
+                                                updated_mcp_config = db_settings.agent_settings.mcp_config
+
+                                        if (
+                                            updated_mcp_config
+                                            and name in updated_mcp_config.mcpServers
+                                        ):
+                                            setattr(
+                                                updated_mcp_config.mcpServers[name],
+                                                'oauth_credentials',
+                                                new_encrypted,
+                                            )
+                                            settings_updated = True
+
+                                if access_token:
+                                    server_dict['auth'] = access_token
+                                    server_dict.pop('oauth_credentials', None)
+                            except Exception as e:
+                                _logger.exception(
+                                    f'Failed to process OAuth credentials for MCP server {name}: {e}'
+                                )
+
+                mcp_servers[name] = server_dict
+
+            if settings_updated and updated_mcp_config:
+                from openhands.app_server.shared import SettingsStoreImpl
+
+                settings_store = await SettingsStoreImpl.get_instance(user.id)
+                db_settings = await settings_store.load()
+                if db_settings:
+                    db_settings.agent_settings.mcp_config = updated_mcp_config
+                    await settings_store.store(db_settings)
+                    _logger.info(
+                        'Successfully persisted refreshed MCP OAuth tokens to settings.'
+                    )
 
             _logger.info(
                 f'Successfully merged custom MCP config: added {count} servers'
@@ -1320,7 +1474,6 @@ class LiveStatusAppConversationService(AppConversationServiceBase):
                 f'Error loading custom MCP config from user settings: {e}',
                 exc_info=True,
             )
-            # Continue with system config only, don't fail conversation startup
             _logger.warning(
                 'Continuing with system-generated MCP config only due to custom config error'
             )
@@ -1348,7 +1501,7 @@ class LiveStatusAppConversationService(AppConversationServiceBase):
         await self._add_system_mcp_servers(mcp_servers, conversation_id)
 
         # Merge custom servers from user settings
-        self._merge_custom_mcp_config(mcp_servers, user)
+        await self._merge_custom_mcp_config(mcp_servers, user)
 
         # Wrap in the mcpServers structure required by the SDK
         mcp_config = {'mcpServers': mcp_servers} if mcp_servers else {}
@@ -1363,6 +1516,7 @@ class LiveStatusAppConversationService(AppConversationServiceBase):
         mcp_config: dict,
         conversation_id: UUID,
         user_id: str | None,
+        selected_repository: str | None = None,
     ) -> Agent:
         """Apply server-only fields that have no place in ``AgentSettings``.
 
@@ -1385,6 +1539,7 @@ class LiveStatusAppConversationService(AppConversationServiceBase):
                 llm_type=agent.llm.usage_id or 'agent',
                 conversation_id=conversation_id,
                 user_id=user_id,
+                selected_repository=selected_repository,
             )
             overrides['llm'] = agent.llm.model_copy(
                 update={'litellm_extra_body': {'metadata': llm_metadata}}
@@ -1402,6 +1557,7 @@ class LiveStatusAppConversationService(AppConversationServiceBase):
                     llm_type='condenser',
                     conversation_id=conversation_id,
                     user_id=user_id,
+                    selected_repository=selected_repository,
                 )
                 condenser_updates['litellm_extra_body'] = {
                     'metadata': condenser_metadata
@@ -1770,7 +1926,7 @@ class LiveStatusAppConversationService(AppConversationServiceBase):
             )
 
         agent = self._apply_server_agent_overrides(
-            agent, agent_type, mcp_config, conversation_id, user.id
+            agent, agent_type, mcp_config, conversation_id, user.id, selected_repository
         )
 
         # --- hooks (require remote workspace; must precede request build) -----

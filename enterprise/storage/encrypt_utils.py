@@ -1,3 +1,4 @@
+import copy
 import binascii
 import hashlib
 import json
@@ -6,7 +7,7 @@ from typing import Any
 
 from cryptography.fernet import Fernet, InvalidToken
 from pydantic import BaseModel, SecretStr
-from sqlalchemy import String, TypeDecorator
+from sqlalchemy import JSON, String, TypeDecorator
 from sqlalchemy.engine.interfaces import Dialect
 
 _jwt_service = None
@@ -32,6 +33,54 @@ def get_jwt_service():
         assert jwt_service_injector is not None
         _jwt_service = jwt_service_injector.get_jwt_service()
     return _jwt_service
+
+
+def get_cipher():
+    from openhands.sdk.utils.cipher import Cipher
+    jwt_svc = get_jwt_service()
+    default_key = jwt_svc.get_key(jwt_svc._default_key_id)
+    secret = default_key.key.get_secret_value()
+    return Cipher(secret)
+
+
+def encrypt_dict_secrets(data: Any, cipher) -> Any:
+    from openhands.sdk.utils.redact import is_secret_key
+    from openhands.sdk.utils.cipher import FERNET_TOKEN_PREFIX
+    if isinstance(data, dict):
+        result = {}
+        for k, v in data.items():
+            if is_secret_key(k) and isinstance(v, str):
+                if v.startswith(FERNET_TOKEN_PREFIX):
+                    result[k] = v
+                else:
+                    encrypted = cipher.encrypt(SecretStr(v))
+                    result[k] = encrypted
+            else:
+                result[k] = encrypt_dict_secrets(v, cipher)
+        return result
+    elif isinstance(data, list):
+        return [encrypt_dict_secrets(item, cipher) for item in data]
+    return data
+
+
+def decrypt_dict_secrets(data: Any, cipher) -> Any:
+    from openhands.sdk.utils.redact import is_secret_key
+    from openhands.sdk.utils.cipher import FERNET_TOKEN_PREFIX
+    if isinstance(data, dict):
+        result = {}
+        for k, v in data.items():
+            if is_secret_key(k) and isinstance(v, str):
+                if v.startswith(FERNET_TOKEN_PREFIX):
+                    decrypted = cipher.try_decrypt_str(v)
+                    result[k] = decrypted if decrypted is not None else v
+                else:
+                    result[k] = v
+            else:
+                result[k] = decrypt_dict_secrets(v, cipher)
+        return result
+    elif isinstance(data, list):
+        return [decrypt_dict_secrets(item, cipher) for item in data]
+    return data
 
 
 def decrypt_legacy_model(decrypt_keys: list, model_instance) -> dict:
@@ -89,20 +138,54 @@ def model_to_kwargs(model_instance):
     }
 
 
+class SecretAwareJSON(TypeDecorator[dict[str, Any]]):
+    """JSON column whose secret fields (leaves) are encrypted at rest.
+
+    Compatible with legacy whole-column encrypted JWE blobs (if it is a JWE token).
+    """
+
+    impl = JSON
+    cache_ok = True
+
+    def process_bind_param(
+        self, value: BaseModel | dict[str, Any] | None, dialect: Dialect
+    ) -> Any:
+        if value is None:
+            return None
+        if isinstance(value, BaseModel):
+            value = value.model_dump(mode='json', context={'expose_secrets': True})
+        else:
+            value = copy.deepcopy(value)
+        cipher = get_cipher()
+        return encrypt_dict_secrets(value, cipher)
+
+    def process_result_value(
+        self, value: Any, dialect: Dialect
+    ) -> dict[str, Any] | None:
+        if value is None:
+            return None
+
+        # Handle legacy whole-column encrypted JWE blobs
+        if isinstance(value, str):
+            try:
+                decrypted = decrypt_value(value)
+                value = json.loads(decrypted)
+            except Exception:
+                try:
+                    value = json.loads(value)
+                except Exception:
+                    pass
+
+        cipher = get_cipher()
+        return decrypt_dict_secrets(value, cipher)
+
+
 class EncryptedJSON(TypeDecorator[dict[str, Any]]):
-    """JSON column whose serialized payload is encrypted at rest.
+    """String column whose payload is a JSON dict with encrypted secret leaves.
 
-    Accepts either a plain ``dict`` or a pydantic ``BaseModel``. Pydantic
-    models are dumped via ``model_dump(mode='json', context={'expose_secrets': True})``
-    so nested ``SecretStr`` values keep their real payload — the column
-    itself is the encryption boundary, so masking on the way in would
-    corrupt round-trips.
-
-    Use for JSON payloads that may contain secrets (e.g. nested ``api_key``
-    fields) where the existing ``_<field>`` String + property pattern is
-    awkward — this keeps the column accessible as a normal ORM attribute
-    while encrypting the entire JSON blob via the same JWE service used
-    by ``encrypt_value``/``decrypt_value``.
+    Matches sa.String underlying type to preserve compatibility with existing
+    sa.String columns (e.g. llm_profiles) without database alter migration.
+    Supports reading legacy JWE-encrypted whole columns and new leaf-encrypted JSON strings.
     """
 
     impl = String
@@ -115,11 +198,27 @@ class EncryptedJSON(TypeDecorator[dict[str, Any]]):
             return None
         if isinstance(value, BaseModel):
             value = value.model_dump(mode='json', context={'expose_secrets': True})
-        return encrypt_value(json.dumps(value))
+        else:
+            value = copy.deepcopy(value)
+        cipher = get_cipher()
+        encrypted = encrypt_dict_secrets(value, cipher)
+        return json.dumps(encrypted)
 
     def process_result_value(
         self, value: str | None, dialect: Dialect
     ) -> dict[str, Any] | None:
         if value is None:
             return None
-        return json.loads(decrypt_value(value))
+
+        # Handle legacy whole-column encrypted JWE blobs or leaf-encrypted JSON string
+        try:
+            decrypted = decrypt_value(value)
+            value_dict = json.loads(decrypted)
+        except Exception:
+            try:
+                value_dict = json.loads(value)
+            except Exception:
+                return None
+
+        cipher = get_cipher()
+        return decrypt_dict_secrets(value_dict, cipher)

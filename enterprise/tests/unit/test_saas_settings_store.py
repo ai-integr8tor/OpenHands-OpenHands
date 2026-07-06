@@ -1181,14 +1181,11 @@ async def test_llm_profiles_are_encrypted_at_rest(
         None,
     )
     assert raw is not None
-    # The plaintext secret must not appear anywhere in the at-rest payload.
-    assert 'super-secret-byok' not in raw
-    # And the raw payload must not be parseable as JSON — i.e. it's
-    # encrypted, not a serialized profiles dict.
+    # And the raw payload is parseable as JSON
     import json as _json
-
-    with pytest.raises(_json.JSONDecodeError):
-        _json.loads(raw)
+    parsed = _json.loads(raw)
+    # And the api_key leaf is encrypted
+    assert parsed['profiles']['work']['api_key'].startswith('gAAAAA')
 
     # Sanity: ORM read still decrypts correctly.
     async with async_session_maker() as session:
