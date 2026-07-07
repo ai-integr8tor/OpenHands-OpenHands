@@ -1365,6 +1365,7 @@ class LiveStatusAppConversationService(AppConversationServiceBase):
         mcp_config: dict,
         conversation_id: UUID,
         user_id: str | None,
+        selected_repository: str | None = None,
     ) -> Agent:
         """Apply server-only fields that have no place in ``AgentSettings``.
 
@@ -1387,6 +1388,7 @@ class LiveStatusAppConversationService(AppConversationServiceBase):
                 llm_type=agent.llm.usage_id or 'agent',
                 conversation_id=conversation_id,
                 user_id=user_id,
+                selected_repository=selected_repository,
             )
             overrides['llm'] = agent.llm.model_copy(
                 update={'litellm_extra_body': {'metadata': llm_metadata}}
@@ -1404,6 +1406,7 @@ class LiveStatusAppConversationService(AppConversationServiceBase):
                     llm_type='condenser',
                     conversation_id=conversation_id,
                     user_id=user_id,
+                    selected_repository=selected_repository,
                 )
                 condenser_updates['litellm_extra_body'] = {
                     'metadata': condenser_metadata
@@ -1770,7 +1773,7 @@ class LiveStatusAppConversationService(AppConversationServiceBase):
             )
 
         agent = self._apply_server_agent_overrides(
-            agent, agent_type, mcp_config, conversation_id, user.id
+            agent, agent_type, mcp_config, conversation_id, user.id, selected_repository
         )
 
         # --- hooks (require remote workspace; must precede request build) -----
