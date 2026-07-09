@@ -4963,6 +4963,23 @@
     "uk": "Використання та моніторинг",
     "ca": "Ús i monitoratge"
   },
+  "SETTINGS$NAV_USAGE_DASHBOARD": {
+    "en": "Usage Dashboard",
+    "ja": "使用状況ダッシュボード",
+    "zh-CN": "使用情况仪表板",
+    "zh-TW": "使用情況儀表板",
+    "ko-KR": "사용 현황 대시보드",
+    "no": "Bruksdashbord",
+    "it": "Dashboard Utilizzo",
+    "pt": "Painel de Uso",
+    "es": "Panel de Uso",
+    "ar": "لوحة الاستخدام",
+    "fr": "Tableau de Bord d'Utilisation",
+    "tr": "Kullanım Panosu",
+    "de": "Nutzungs-Dashboard",
+    "uk": "Панель використання",
+    "ca": "Tauler d'Ús"
+  },
   "SETTINGS$NAV_ORG_MEMBERS": {
     "en": "Org Members",
     "ja": "組織メンバー",

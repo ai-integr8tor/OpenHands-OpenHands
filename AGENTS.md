@@ -520,3 +520,23 @@ Called by `workspace.get_llm()` in the SDK to retrieve LLM config with the API k
 - `.github/workflows/issue-opened.yml` has a second issue-opened job that auto-applies `good first issue` after the duplicate check completes.
 - The duplicate check is used only as a veto/guardrail for `good first issue` automation: duplicate or overlapping-scope issues should not be auto-labeled.
 - The OpenHands classifier logic for newcomer suitability lives in `scripts/issue_good_first_issue_check_openhands.py`, with focused unit coverage in `tests/unit/test_issue_good_first_issue_check_openhands.py`.
+
+## GitHub Authentication Notes
+
+- `GITHUB_PERSONAL_ACCESS_TOKEN` is a **fine-grained PAT with read-only access** to OpenHands/OpenHands. It cannot push branches or create PRs.
+- For git push and PR creation, use the **GitHub OAuth token from the macOS keychain**:
+  ```bash
+  GH_KEYCHAIN_TOKEN=$(printf "protocol=https\nhost=github.com\nusername=jpelletier1\n" | git credential-osxkeychain get | grep "^password=" | cut -d= -f2)
+  ```
+- Use `GH_TOKEN=$GH_KEYCHAIN_TOKEN gh pr create ...` to create PRs via the gh CLI.
+- Use `git remote set-url origin "https://jpelletier1:${GH_KEYCHAIN_TOKEN}@github.com/OpenHands/OpenHands.git"` for git push.
+
+## Settings Page Pattern (Frontend)
+
+To add a new page to the Settings area:
+1. Create `frontend/src/components/features/<name>/<name>.tsx` — the main component
+2. Create `frontend/src/routes/<name>.tsx` — thin wrapper calling the component
+3. Add `route("<name>", "routes/<name>.tsx")` inside the settings layout in `frontend/src/routes.ts`
+4. Add nav item to `SAAS_NAV_ITEMS` and/or `OSS_NAV_ITEMS` in `frontend/src/constants/settings-nav.tsx`
+5. Add i18n key to `frontend/src/i18n/declaration.ts` and translations to `frontend/src/i18n/translation.json`
+6. Optionally add route protection in `frontend/src/routes/settings.tsx` clientLoader

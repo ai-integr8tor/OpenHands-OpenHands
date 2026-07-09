@@ -1,4 +1,4 @@
-import { FiUsers, FiBriefcase, FiBarChart2 } from "react-icons/fi";
+import { FiUsers, FiBriefcase, FiBarChart2, FiTrendingUp } from "react-icons/fi";
 import CreditCardIcon from "#/icons/credit-card.svg?react";
 import KeyIcon from "#/icons/key.svg?react";
 import LightbulbIcon from "#/icons/lightbulb.svg?react";
@@ -51,6 +51,12 @@ export const SAAS_NAV_ITEMS: SettingsNavItem[] = [
     icon: <FiBarChart2 size={22} />,
     to: "/settings/usage-monitoring",
     text: "SETTINGS$NAV_ADMIN_DASHBOARD",
+    section: "org",
+  },
+  {
+    icon: <FiTrendingUp size={22} />,
+    to: "/settings/usage-dashboard",
+    text: "SETTINGS$NAV_USAGE_DASHBOARD",
     section: "org",
   },
   {
@@ -152,6 +158,11 @@ export const OSS_NAV_ITEMS: SettingsNavItem[] = [
     icon: <RobotIcon width={22} height={22} />,
     to: "/settings/agent",
     text: "SETTINGS$AGENT",
+  },
+  {
+    icon: <FiTrendingUp size={22} />,
+    to: "/settings/usage-dashboard",
+    text: "SETTINGS$NAV_USAGE_DASHBOARD",
   },
   {
     icon: <CircuitIcon width={22} height={22} />,
