@@ -10,6 +10,7 @@ from typing import AsyncGenerator
 from uuid import uuid4
 
 import pytest
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
@@ -1270,3 +1271,162 @@ class TestFixTimezone:
         aware_dt = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
         result = service._fix_timezone(aware_dt)
         assert result == aware_dt
+
+
+class TestSaveGitWriteOnce:
+    """``preserve_git_fields_on_null`` makes the git fields write-once for the
+    webhook/startup path only.
+
+    The conversation-start webhook sees a None-filled stub when the create has not
+    yet been persisted (the race), so it saves with ``preserve_git_fields_on_null=
+    True`` and a None must not wipe a stored repo. The default (flag off, used by
+    explicit update/PATCH callers) still lets a None clear the fields, preserving
+    the documented "set repository to null to remove it" contract. Regression cover
+    for the conversation metadata save race (#14476).
+    """
+
+    @pytest.mark.asyncio
+    async def test_webhook_stub_does_not_null_repository(
+        self,
+        service: SQLAppConversationInfoService,
+        sample_conversation_info: AppConversationInfo,
+    ):
+        """The exact race: create commits the repo, then the webhook saves a None
+        stub with the preserve flag. Pre-fix ``merge()`` nulled it; COALESCE keeps
+        it."""
+        await service.save_app_conversation_info(sample_conversation_info)
+
+        stub = sample_conversation_info.model_copy(
+            update={
+                'selected_repository': None,
+                'selected_branch': None,
+                'git_provider': None,
+                'title': f'Conversation {sample_conversation_info.id.hex}',
+            }
+        )
+        await service.save_app_conversation_info(stub, preserve_git_fields_on_null=True)
+
+        retrieved = await service.get_app_conversation_info(sample_conversation_info.id)
+        assert retrieved is not None
+        assert (
+            retrieved.selected_repository
+            == sample_conversation_info.selected_repository
+        )
+        assert retrieved.selected_branch == sample_conversation_info.selected_branch
+        assert retrieved.git_provider == sample_conversation_info.git_provider
+
+    @pytest.mark.asyncio
+    async def test_webhook_stub_wins_when_persisted_first(
+        self,
+        service: SQLAppConversationInfoService,
+        sample_conversation_info: AppConversationInfo,
+    ):
+        """Order-independent: a webhook stub landing before the create still ends
+        up with the repo once the create (default flag) writes it."""
+        stub = sample_conversation_info.model_copy(
+            update={
+                'selected_repository': None,
+                'selected_branch': None,
+                'git_provider': None,
+            }
+        )
+        await service.save_app_conversation_info(stub, preserve_git_fields_on_null=True)
+        await service.save_app_conversation_info(sample_conversation_info)
+
+        retrieved = await service.get_app_conversation_info(sample_conversation_info.id)
+        assert retrieved is not None
+        assert (
+            retrieved.selected_repository
+            == sample_conversation_info.selected_repository
+        )
+
+    @pytest.mark.asyncio
+    async def test_explicit_update_can_clear_repository(
+        self,
+        service: SQLAppConversationInfoService,
+        sample_conversation_info: AppConversationInfo,
+    ):
+        """Default flag off: an explicit None update still clears the repo, so the
+        documented PATCH "remove repository" contract keeps working."""
+        await service.save_app_conversation_info(sample_conversation_info)
+
+        cleared = sample_conversation_info.model_copy(
+            update={
+                'selected_repository': None,
+                'selected_branch': None,
+                'git_provider': None,
+            }
+        )
+        await service.save_app_conversation_info(cleared)
+
+        retrieved = await service.get_app_conversation_info(sample_conversation_info.id)
+        assert retrieved is not None
+        assert retrieved.selected_repository is None
+        assert retrieved.selected_branch is None
+        assert retrieved.git_provider is None
+
+    @pytest.mark.asyncio
+    async def test_save_recovers_from_insert_integrity_race(
+        self,
+        service: SQLAppConversationInfoService,
+        sample_conversation_info: AppConversationInfo,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        """A concurrent writer can win the insert race (duplicate PK). The loser
+        rolls back and re-runs the update instead of surfacing the IntegrityError,
+        which would otherwise leave a started conversation unsaved."""
+        real_commit = service.db_session.commit
+        real_rollback = service.db_session.rollback
+        calls = {'commit': 0, 'rollback': 0}
+
+        async def flaky_commit():
+            calls['commit'] += 1
+            if calls['commit'] == 1:
+                raise IntegrityError(
+                    'INSERT INTO conversation_metadata ...',
+                    {},
+                    Exception(
+                        'UNIQUE constraint failed: conversation_metadata.conversation_id'
+                    ),
+                )
+            await real_commit()
+
+        async def counting_rollback():
+            calls['rollback'] += 1
+            await real_rollback()
+
+        monkeypatch.setattr(service.db_session, 'commit', flaky_commit)
+        monkeypatch.setattr(service.db_session, 'rollback', counting_rollback)
+
+        # Must not raise; the first (insert) commit fails, then rollback + retry.
+        await service.save_app_conversation_info(
+            sample_conversation_info, preserve_git_fields_on_null=True
+        )
+        assert calls == {'commit': 2, 'rollback': 1}
+
+    @pytest.mark.asyncio
+    async def test_no_repo_conversation_stays_none(
+        self,
+        service: SQLAppConversationInfoService,
+        sample_conversation_info: AppConversationInfo,
+    ):
+        """A repo-less conversation saved twice via the webhook path stays None
+        (COALESCE(None, None) is None)."""
+        no_repo = sample_conversation_info.model_copy(
+            update={
+                'selected_repository': None,
+                'selected_branch': None,
+                'git_provider': None,
+            }
+        )
+        await service.save_app_conversation_info(
+            no_repo, preserve_git_fields_on_null=True
+        )
+        await service.save_app_conversation_info(
+            no_repo, preserve_git_fields_on_null=True
+        )
+
+        retrieved = await service.get_app_conversation_info(no_repo.id)
+        assert retrieved is not None
+        assert retrieved.selected_repository is None
+        assert retrieved.git_provider is None

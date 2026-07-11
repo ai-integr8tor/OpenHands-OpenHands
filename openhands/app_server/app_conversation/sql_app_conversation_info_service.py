@@ -35,8 +35,10 @@ from sqlalchemy import (
     String,
     func,
     select,
+    update,
 )
 from sqlalchemy.engine import CursorResult
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -392,7 +394,10 @@ class SQLAppConversationInfoService(AppConversationInfoService):
         return results
 
     async def save_app_conversation_info(
-        self, info: AppConversationInfo
+        self,
+        info: AppConversationInfo,
+        *,
+        preserve_git_fields_on_null: bool = False,
     ) -> AppConversationInfo:
         metrics = info.metrics or MetricsSnapshot()
         usage = metrics.accumulated_token_usage or TokenUsage()
@@ -430,8 +435,40 @@ class SQLAppConversationInfoService(AppConversationInfoService):
             tags=info.tags if info.tags else None,
         )
 
-        await self.db_session.merge(stored)
-        await self.db_session.commit()
+        # Git fields are write-once for the webhook/startup path: a stub racing the
+        # create carries None and must not wipe a stored repo (see #14476). Explicit
+        # update callers leave the flag off so a None still clears them.
+        update_values: dict = {
+            column.name: getattr(stored, column.name)
+            for column in StoredConversationMetadata.__table__.columns
+            if column.name != 'conversation_id'
+        }
+        if preserve_git_fields_on_null:
+            for field in ('selected_repository', 'selected_branch', 'git_provider'):
+                update_values[field] = func.coalesce(
+                    getattr(stored, field),
+                    getattr(StoredConversationMetadata, field),
+                )
+        update_stmt = (
+            update(StoredConversationMetadata)
+            .where(StoredConversationMetadata.conversation_id == stored.conversation_id)
+            .values(update_values)
+        )
+
+        result = cast(CursorResult, await self.db_session.execute(update_stmt))
+        if result.rowcount == 0:
+            # No row yet: insert it. A concurrent writer may win the insert race
+            # (duplicate PK); recover by re-running the update instead of raising,
+            # which would otherwise leave a started conversation without metadata.
+            try:
+                self.db_session.add(stored)
+                await self.db_session.commit()
+            except IntegrityError:
+                await self.db_session.rollback()
+                await self.db_session.execute(update_stmt)
+                await self.db_session.commit()
+        else:
+            await self.db_session.commit()
         return info
 
     async def update_conversation_statistics(
