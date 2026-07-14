@@ -157,8 +157,7 @@ class SecretAwareJSON(TypeDecorator[dict[str, Any]]):
     """JSON string column that encrypts nested Pydantic secret fields only.
 
     The database value remains parseable JSON for non-secret operational data,
-    while SDK serializers encrypt fields such as LLM ``api_key`` values. Older
-    rows written by :class:`EncryptedJSON` are still accepted on read.
+    while SDK serializers encrypt fields such as LLM ``api_key`` values.
     """
 
     impl = String
@@ -185,6 +184,9 @@ class SecretAwareJSON(TypeDecorator[dict[str, Any]]):
         try:
             return json.loads(value)
         except json.JSONDecodeError:
+            # Rows written before field-level settings encryption used an
+            # encrypted JSON blob. Keep them readable during migration while
+            # all new writes remain plain JSON with encrypted secret leaves.
             return json.loads(decrypt_value(value))
 
 
