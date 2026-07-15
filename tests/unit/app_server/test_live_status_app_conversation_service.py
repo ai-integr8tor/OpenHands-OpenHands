@@ -4143,24 +4143,61 @@ class TestBuildAcpStartConversationRequestSecrets:
         assert request.secrets.get('OTHER') is other_secret
 
     @pytest.mark.asyncio
-    async def test_llm_api_key_not_forwarded_to_request_secrets(
-        self, service, tmp_path
-    ):
-        """llm.api_key must not bleed into request.secrets for ACP.
-
-        ACP does not use the SDK's LLM layer — the CLI subprocess handles its
-        own model calls.  Credentials must be supplied via the Secrets panel
-        (request.secrets channel), not via llm.api_key.
-        """
+    async def test_llm_api_key_forwarded_to_request_secrets(self, service, tmp_path):
+        """llm.api_key is forwarded to request.secrets for ACP."""
         user = self._make_acp_user(acp_server='claude-code', api_key='sk-ui-key')
 
         request = await self._call_build(service, user, tmp_path)
 
-        agent_ctx_secrets = (
-            request.agent.agent_context.secrets if request.agent.agent_context else {}
-        ) or {}
-        assert 'ANTHROPIC_API_KEY' not in agent_ctx_secrets
-        assert 'ANTHROPIC_API_KEY' not in request.secrets
+        assert 'ANTHROPIC_API_KEY' in request.secrets
+        assert (
+            request.secrets['ANTHROPIC_API_KEY'].value.get_secret_value() == 'sk-ui-key'
+        )
+
+    @pytest.mark.asyncio
+    async def test_custom_acp_ollama_base_url_forwarded(self, service, tmp_path):
+        """Ollama base URL is mapped to standard OLLAMA environment variables."""
+        try:
+            from openhands.sdk.settings import ACPAgentSettings
+        except ImportError:
+            pytest.skip('ACPAgentSettings not available')
+
+        user = _TestUserInfo(
+            id='user1',
+            llm_model='',
+            llm_base_url=None,
+            llm_api_key=None,
+            sandbox_grouping_strategy=SandboxGroupingStrategy.ADD_TO_ANY,
+            confirmation_mode=False,
+            security_analyzer=None,
+            search_api_key=None,
+            mcp_config=None,
+            disabled_skills=[],
+        )
+        user.agent_settings = ACPAgentSettings(
+            acp_server='custom',
+            acp_command=['opencode'],
+            llm=LLM(
+                model='ollama/opencode-model',
+                base_url='http://localhost:11434',
+            ),
+        )
+
+        with patch(
+            'openhands.app_server.utils.docker_utils.is_running_in_docker',
+            return_value=True,
+        ):
+            request = await self._call_build(service, user, tmp_path)
+
+        expected_url = 'http://host.docker.internal:11434'
+        assert (
+            request.secrets.get('OLLAMA_BASE_URL').value.get_secret_value()
+            == expected_url
+        )
+        assert (
+            request.secrets.get('OLLAMA_API_BASE').value.get_secret_value()
+            == expected_url
+        )
 
     @pytest.mark.asyncio
     async def test_no_secrets_request_secrets_empty(self, service, tmp_path):

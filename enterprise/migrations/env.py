@@ -37,7 +37,7 @@ GCP_DB_INSTANCE = os.getenv('GCP_DB_INSTANCE')
 GCP_PROJECT = os.getenv('GCP_PROJECT')
 GCP_REGION = os.getenv('GCP_REGION')
 
-POOL_SIZE = int(os.getenv('DB_POOL_SIZE', '25'))
+POOL_SIZE = int(os.getenv('DB_POOL_SIZE', '5'))
 MAX_OVERFLOW = int(os.getenv('DB_MAX_OVERFLOW', '10'))
 
 

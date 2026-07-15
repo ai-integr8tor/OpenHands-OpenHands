@@ -2116,6 +2116,85 @@ class LiveStatusAppConversationService(AppConversationServiceBase):
         acp_settings = user.agent_settings  # already verified to be ACPAgentSettings
         assert isinstance(acp_settings, ACPAgentSettings)
 
+        # Inject LLM credentials and base URL into the secrets dictionary
+        # so the ACP subprocess can access them through state.secret_registry.
+        # Apply localhost replacement for Docker container environments.
+        from openhands.app_server.utils.docker_utils import (
+            replace_localhost_hostname_for_docker,
+        )
+
+        llm_api_key = acp_settings.llm.api_key
+        llm_base_url = acp_settings.llm.base_url
+
+        secret_key_val: SecretStr | None = None
+        if llm_api_key is not None:
+            secret_key_val = (
+                llm_api_key
+                if isinstance(llm_api_key, SecretStr)
+                else SecretStr(llm_api_key)
+            )
+
+        if llm_base_url:
+            llm_base_url = replace_localhost_hostname_for_docker(llm_base_url)
+
+        # 1. Built-in provider environment variables mapping
+        if acp_settings.api_key_env_var and secret_key_val:
+            if acp_settings.api_key_env_var not in secrets:
+                secrets[acp_settings.api_key_env_var] = StaticSecret(
+                    value=secret_key_val
+                )
+        if acp_settings.base_url_env_var and llm_base_url:
+            if acp_settings.base_url_env_var not in secrets:
+                secrets[acp_settings.base_url_env_var] = StaticSecret(
+                    value=SecretStr(llm_base_url)
+                )
+
+        # 2. Model-provider standard environment variables mapping (e.g., for custom servers)
+        model = acp_settings.llm.model
+        if model:
+            provider_name = ''
+            if '/' in model:
+                provider_name = model.split('/', 1)[0].lower()
+
+            env_mappings: dict[str, Any] = {}
+            if provider_name == 'ollama':
+                env_mappings = {
+                    'OLLAMA_BASE_URL': llm_base_url,
+                    'OLLAMA_API_BASE': llm_base_url,
+                }
+            elif provider_name == 'openai':
+                env_mappings = {
+                    'OPENAI_API_KEY': secret_key_val,
+                    'OPENAI_BASE_URL': llm_base_url,
+                    'OPENAI_API_BASE': llm_base_url,
+                }
+            elif provider_name == 'anthropic':
+                env_mappings = {
+                    'ANTHROPIC_API_KEY': secret_key_val,
+                    'ANTHROPIC_BASE_URL': llm_base_url,
+                    'ANTHROPIC_API_BASE': llm_base_url,
+                }
+            elif provider_name in ('gemini', 'google'):
+                env_mappings = {
+                    'GEMINI_API_KEY': secret_key_val,
+                    'GOOGLE_API_KEY': secret_key_val,
+                    'GEMINI_BASE_URL': llm_base_url,
+                    'GEMINI_API_BASE': llm_base_url,
+                }
+            elif provider_name == 'mistral':
+                env_mappings = {
+                    'MISTRAL_API_KEY': secret_key_val,
+                    'MISTRAL_BASE_URL': llm_base_url,
+                    'MISTRAL_API_BASE': llm_base_url,
+                }
+
+            for env_var, val in env_mappings.items():
+                if val is not None and env_var not in secrets:
+                    if isinstance(val, SecretStr):
+                        secrets[env_var] = StaticSecret(value=val)
+                    else:
+                        secrets[env_var] = StaticSecret(value=SecretStr(str(val)))
+
         # Isolate the CLI data dir onto the durable /workspace tree so the SDK
         # self-resumes the provider session (session/load from base_state.json)
         # across pause/resume — matching the regular-agent lifecycle (#1274).

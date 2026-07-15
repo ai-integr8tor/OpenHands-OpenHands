@@ -103,7 +103,7 @@ class TestDbSessionInjectorConfiguration:
             service.password.get_secret_value() == 'postgres'
         )  # Default from env var processing
         assert service.echo is False
-        assert service.pool_size == 25
+        assert service.pool_size == 5
         assert service.max_overflow == 10
         assert service.pool_use_lifo is True
         assert service.gcp_db_instance is None
@@ -123,6 +123,8 @@ class TestDbSessionInjectorConfiguration:
             'GCP_DB_INSTANCE': 'env_instance',
             'GCP_PROJECT': 'env_project',
             'GCP_REGION': 'env_region',
+            'DB_POOL_SIZE': '8',
+            'DB_MAX_OVERFLOW': '12',
         }
 
         with patch.dict(os.environ, env_vars):
@@ -137,6 +139,8 @@ class TestDbSessionInjectorConfiguration:
             assert service.gcp_project == 'env_project'
             assert service.gcp_region == 'env_region'
             assert service.ssl_mode == 'require'
+            assert service.pool_size == 8
+            assert service.max_overflow == 12
 
     def test_explicit_values_override_env_vars(self, temp_persistence_dir):
         """Test that explicitly provided values override environment variables."""
@@ -146,6 +150,8 @@ class TestDbSessionInjectorConfiguration:
             'DB_NAME': 'env_db',
             'DB_USER': 'env_user',
             'DB_PASS': 'env_password',
+            'DB_POOL_SIZE': '8',
+            'DB_MAX_OVERFLOW': '12',
         }
 
         with patch.dict(os.environ, env_vars):
@@ -156,6 +162,8 @@ class TestDbSessionInjectorConfiguration:
                 name='explicit_db',
                 user='explicit_user',
                 password=SecretStr('explicit_password'),
+                pool_size=15,
+                max_overflow=20,
             )
 
             assert service.host == 'explicit_host'
@@ -163,6 +171,21 @@ class TestDbSessionInjectorConfiguration:
             assert service.name == 'explicit_db'
             assert service.user == 'explicit_user'
             assert service.password.get_secret_value() == 'explicit_password'
+            assert service.pool_size == 15
+            assert service.max_overflow == 20
+
+    def test_invalid_environment_variables_fallback(self, temp_persistence_dir):
+        """Test that invalid values in environment variables fallback to defaults."""
+        env_vars = {
+            'DB_POOL_SIZE': 'invalid_int',
+            'DB_MAX_OVERFLOW': 'another_invalid',
+        }
+
+        with patch.dict(os.environ, env_vars):
+            service = DbSessionInjector(persistence_dir=temp_persistence_dir)
+
+            assert service.pool_size == 5
+            assert service.max_overflow == 10
 
 
 class TestDbSessionInjectorConnections:
@@ -213,7 +236,7 @@ class TestDbSessionInjectorConnections:
 
             # Verify other parameters
             assert call_args[1]['connect_args'] == {}
-            assert call_args[1]['pool_size'] == 25
+            assert call_args[1]['pool_size'] == 5
             assert call_args[1]['max_overflow'] == 10
             assert call_args[1]['pool_pre_ping']
             assert call_args[1]['pool_use_lifo'] is True
@@ -247,7 +270,7 @@ class TestDbSessionInjectorConnections:
 
             # Verify other parameters
             assert call_args[1]['connect_args'] == {}
-            assert call_args[1]['pool_size'] == 25
+            assert call_args[1]['pool_size'] == 5
             assert call_args[1]['max_overflow'] == 10
             assert call_args[1]['pool_pre_ping']
             assert call_args[1]['pool_use_lifo'] is True

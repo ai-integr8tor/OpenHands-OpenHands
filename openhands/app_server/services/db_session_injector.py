@@ -34,8 +34,8 @@ class DbSessionInjector(BaseModel, Injector[AsyncSession]):
     user: str | None = None
     password: SecretStr | None = None
     echo: bool = False
-    pool_size: int = 25
-    max_overflow: int = 10
+    pool_size: int | None = None
+    max_overflow: int | None = None
     pool_recycle: int = 1800
     pool_use_lifo: bool = True
     gcp_db_instance: str | None = None
@@ -71,6 +71,33 @@ class DbSessionInjector(BaseModel, Injector[AsyncSession]):
             self.gcp_region = os.getenv('GCP_REGION')
         if self.ssl_mode is None:
             self.ssl_mode = os.getenv('DB_SSL_MODE') or os.getenv('PGSSLMODE')
+
+        if self.pool_size is None:
+            pool_size_env = os.getenv('DB_POOL_SIZE')
+            if pool_size_env is not None:
+                try:
+                    self.pool_size = int(pool_size_env)
+                except ValueError:
+                    _logger.warning(
+                        f"Invalid DB_POOL_SIZE value '{pool_size_env}', defaulting to 5"
+                    )
+                    self.pool_size = 5
+            else:
+                self.pool_size = 5
+
+        if self.max_overflow is None:
+            max_overflow_env = os.getenv('DB_MAX_OVERFLOW')
+            if max_overflow_env is not None:
+                try:
+                    self.max_overflow = int(max_overflow_env)
+                except ValueError:
+                    _logger.warning(
+                        f"Invalid DB_MAX_OVERFLOW value '{max_overflow_env}', defaulting to 10"
+                    )
+                    self.max_overflow = 10
+            else:
+                self.max_overflow = 10
+
         return self
 
     def _create_gcp_db_connection(self):
