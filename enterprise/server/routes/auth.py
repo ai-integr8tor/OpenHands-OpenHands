@@ -4,7 +4,7 @@ import uuid
 import warnings
 from datetime import datetime, timedelta, timezone
 from types import MappingProxyType
-from typing import Annotated, Optional, cast
+from typing import Annotated, Any, Optional, cast
 from urllib.parse import parse_qs, quote, urlencode, urlparse
 from uuid import UUID as parse_uuid
 
@@ -952,10 +952,12 @@ async def accept_tos(request: Request):
                     if email and '@' in email
                     else None,
                 )
-                analytics.set_person_properties(
-                    ctx=ctx,
-                    properties={'signed_up_at': datetime.now(timezone.utc).isoformat()},
-                )
+                person_props: dict[str, Any] = {
+                    'signed_up_at': datetime.now(timezone.utc).isoformat(),
+                }
+                if email:
+                    person_props['email'] = email
+                analytics.set_person_properties(ctx=ctx, properties=person_props)
         except Exception:
             logger.exception('analytics:user_signed_up:failed')
 

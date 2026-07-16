@@ -2498,6 +2498,125 @@ async def test_accept_tos_preserves_offline_flow_redirect(mock_request):
         assert response_body['redirect_url'] == offline_redirect_url
 
 
+@pytest.mark.asyncio
+async def test_accept_tos_sets_email_person_property(mock_request):
+    """Test that accept_tos includes email in set_person_properties call when available."""
+    # Arrange
+    test_user_id = '12345678-1234-5678-1234-567812345678'
+    test_email = 'test@example.com'
+
+    mock_user = MagicMock()
+    mock_user.id = test_user_id
+    mock_user.email = test_email
+    mock_user.current_org_id = None
+
+    mock_result = MagicMock()
+    mock_result.scalar_one_or_none.return_value = mock_user
+
+    mock_session = AsyncMock()
+    mock_session.execute.return_value = mock_result
+    mock_session.commit = AsyncMock()
+
+    mock_session_context = AsyncMock()
+    mock_session_context.__aenter__.return_value = mock_session
+    mock_session_context.__aexit__.return_value = None
+
+    mock_user_auth = MagicMock(spec=SaasUserAuth)
+    mock_user_auth.get_access_token = AsyncMock(
+        return_value=SecretStr('test_access_token')
+    )
+    mock_user_auth.refresh_token = SecretStr('test_refresh_token')
+    mock_user_auth.get_user_id = AsyncMock(return_value=test_user_id)
+
+    mock_request.json = AsyncMock(return_value={'redirect_url': 'http://example.com'})
+
+    mock_analytics = MagicMock()
+
+    with (
+        patch(
+            'server.routes.auth.get_user_auth', AsyncMock(return_value=mock_user_auth)
+        ),
+        patch('server.routes.auth.a_session_maker', return_value=mock_session_context),
+        patch('server.routes.auth.set_response_cookie'),
+        patch(
+            'server.routes.auth._get_post_auth_redirect',
+            AsyncMock(return_value='http://example.com'),
+        ),
+        patch('server.routes.auth.get_analytics_service', return_value=mock_analytics),
+    ):
+        # Act
+        result = await accept_tos(mock_request)
+
+        # Assert
+        assert isinstance(result, JSONResponse)
+        assert result.status_code == status.HTTP_200_OK
+
+        # Verify set_person_properties was called with email included
+        mock_analytics.set_person_properties.assert_called_once()
+        call_kwargs = mock_analytics.set_person_properties.call_args.kwargs
+        assert 'signed_up_at' in call_kwargs['properties']
+        assert call_kwargs['properties']['email'] == test_email
+
+
+@pytest.mark.asyncio
+async def test_accept_tos_omits_email_when_empty(mock_request):
+    """Test that accept_tos omits email in set_person_properties call when user.email is empty."""
+    # Arrange
+    test_user_id = '12345678-1234-5678-1234-567812345678'
+
+    mock_user = MagicMock()
+    mock_user.id = test_user_id
+    mock_user.email = ''  # Empty email
+    mock_user.current_org_id = None
+
+    mock_result = MagicMock()
+    mock_result.scalar_one_or_none.return_value = mock_user
+
+    mock_session = AsyncMock()
+    mock_session.execute.return_value = mock_result
+    mock_session.commit = AsyncMock()
+
+    mock_session_context = AsyncMock()
+    mock_session_context.__aenter__.return_value = mock_session
+    mock_session_context.__aexit__.return_value = None
+
+    mock_user_auth = MagicMock(spec=SaasUserAuth)
+    mock_user_auth.get_access_token = AsyncMock(
+        return_value=SecretStr('test_access_token')
+    )
+    mock_user_auth.refresh_token = SecretStr('test_refresh_token')
+    mock_user_auth.get_user_id = AsyncMock(return_value=test_user_id)
+
+    mock_request.json = AsyncMock(return_value={'redirect_url': 'http://example.com'})
+
+    mock_analytics = MagicMock()
+
+    with (
+        patch(
+            'server.routes.auth.get_user_auth', AsyncMock(return_value=mock_user_auth)
+        ),
+        patch('server.routes.auth.a_session_maker', return_value=mock_session_context),
+        patch('server.routes.auth.set_response_cookie'),
+        patch(
+            'server.routes.auth._get_post_auth_redirect',
+            AsyncMock(return_value='http://example.com'),
+        ),
+        patch('server.routes.auth.get_analytics_service', return_value=mock_analytics),
+    ):
+        # Act
+        result = await accept_tos(mock_request)
+
+        # Assert
+        assert isinstance(result, JSONResponse)
+        assert result.status_code == status.HTTP_200_OK
+
+        # Verify set_person_properties was called WITHOUT email
+        mock_analytics.set_person_properties.assert_called_once()
+        call_kwargs = mock_analytics.set_person_properties.call_args.kwargs
+        assert 'signed_up_at' in call_kwargs['properties']
+        assert 'email' not in call_kwargs['properties']
+
+
 # ---------------------------------------------------------------------------
 # Tests for _get_user_orgs_with_data helper function
 # ---------------------------------------------------------------------------
