@@ -211,9 +211,10 @@ def compose_marketplaces(
     """Compose marketplaces from the three scopes, keyed on ``name``.
 
     Precedence is Instance < Org < User for identity; org overrides an instance
-    entry of the same name, and a user entry is dropped when its name already
-    exists at a broader scope. Invalid entries are skipped. Order is preserved
-    (instance, then org additions, then user additions).
+    entry of the same name. When a marketplace is registered at multiple scopes
+    (e.g., both org and personal), both registrations are kept so the UI can
+    display all applicable scope tags. Invalid entries are skipped. Order is
+    preserved (instance, then org additions, then user additions).
     """
 
     def _stamp(
@@ -238,11 +239,14 @@ def compose_marketplaces(
         reg = _coerce(raw)
         if reg is None:
             continue
+        # Changed: Keep personal marketplaces even if they shadow inherited ones.
+        # This allows the UI to show both scope tags when a marketplace is
+        # registered at multiple levels (e.g., org + personal).
         if reg.name in inherited:
             logger.debug(
-                "User marketplace '%s' shadows an inherited one; ignoring", reg.name
+                "User marketplace '%s' also exists in inherited scope; keeping both for UI visibility",
+                reg.name,
             )
-            continue
         personal[reg.name] = _stamp(reg, MarketplaceScope.PERSONAL)
 
     return ComposedMarketplaces(

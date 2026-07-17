@@ -19,7 +19,11 @@ import { useMarketplaceMutations } from "#/hooks/mutation/use-marketplace-mutati
 import { useSkillMutations } from "#/hooks/mutation/use-skill-mutations";
 import { MarketplaceTable } from "#/components/features/settings/skills-settings/marketplace-table";
 import { SkillsTable } from "#/components/features/settings/skills-settings/skills-table";
-import { MarketplaceRegistration, SkillWithState } from "#/types/settings";
+import {
+  MarketplaceRegistration,
+  MarketplaceDisplay,
+  SkillWithState,
+} from "#/types/settings";
 import { I18nKey } from "#/i18n/declaration";
 import SkillsService from "#/api/skills-service";
 import { displayErrorToast } from "#/utils/custom-toast-handlers";
@@ -53,6 +57,9 @@ function SkillsSettingsScreen() {
   // State for marketplaces
   const [allMarketplaces, setAllMarketplaces] = useState<
     MarketplaceRegistration[]
+  >([]);
+  const [displayMarketplaces, setDisplayMarketplaces] = useState<
+    MarketplaceDisplay[]
   >([]);
   const originalMarketplacesRef = useRef<MarketplaceRegistration[]>([]);
   const [lastKnownUpdatedAt, setLastKnownUpdatedAt] = useState<string | null>(
@@ -134,6 +141,42 @@ function SkillsSettingsScreen() {
     ];
     setAllMarketplaces(all);
     originalMarketplacesRef.current = all;
+
+    // Group marketplaces by name for display (to show multiple scopes)
+    const grouped = new Map<string, MarketplaceDisplay>();
+    for (const mp of all) {
+      const existing = grouped.get(mp.name);
+      const scope = mp.scope ?? "personal";
+      
+      if (existing) {
+        // Add this scope to the existing entry
+        existing.scopes.push(scope);
+        existing.registrations.set(scope, mp);
+        // Prefer non-instance auto_load for display
+        if (scope !== "instance" && mp.auto_load) {
+          existing.auto_load = mp.auto_load;
+        }
+      } else {
+        // Create new display entry
+        const registrations = new Map<
+          "instance" | "org" | "personal",
+          MarketplaceRegistration
+        >();
+        registrations.set(scope, mp);
+        
+        grouped.set(mp.name, {
+          name: mp.name,
+          source: mp.source,
+          ref: mp.ref,
+          repo_path: mp.repo_path,
+          auto_load: mp.auto_load,
+          scopes: [scope],
+          registrations,
+        });
+      }
+    }
+    
+    setDisplayMarketplaces(Array.from(grouped.values()));
 
     // Marketplace lookup for skills (keyed by source; scope comes from backend).
     const marketplaceMap = new Map<
@@ -566,7 +609,7 @@ function SkillsSettingsScreen() {
           </div>
 
           <MarketplaceTable
-            marketplaces={allMarketplaces}
+            marketplaces={displayMarketplaces}
             onToggleAutoLoad={handleToggleMarketplaceAutoLoad}
             onEdit={openEditModal}
             onDelete={openDeleteModal}

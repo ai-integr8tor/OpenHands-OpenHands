@@ -1,6 +1,6 @@
 import React from "react";
 import { useTranslation } from "react-i18next";
-import { MarketplaceRegistration } from "#/types/settings";
+import { MarketplaceDisplay, MarketplaceRegistration } from "#/types/settings";
 import { Toggle } from "#/components/shared/toggle/toggle";
 import { InfoTooltip } from "#/components/features/settings/info-tooltip";
 import { I18nKey } from "#/i18n/declaration";
@@ -9,7 +9,7 @@ import EditIcon from "#/icons/u-edit.svg?react";
 import DeleteIcon from "#/icons/u-delete.svg?react";
 
 interface MarketplaceTableProps {
-  marketplaces: MarketplaceRegistration[];
+  marketplaces: MarketplaceDisplay[];
   onToggleAutoLoad: (name: string) => void;
   onEdit: (marketplace: MarketplaceRegistration) => void;
   onDelete: (marketplace: MarketplaceRegistration) => void;
@@ -101,91 +101,113 @@ export function MarketplaceTable({
             </tr>
           </thead>
           <tbody>
-            {marketplaces.map((mp) => (
-              <tr
-                key={mp.name}
-                className="border-t border-tertiary/60 transition-colors hover:bg-base-secondary/40"
-              >
-                <td
-                  className={cn(CELL_CLASS, "font-medium text-content-2")}
-                  title={mp.name}
+            {marketplaces.map((mp) => {
+              // Determine the editable scope (prefer personal > org > instance)
+              const editableScope = mp.scopes.includes("personal")
+                ? "personal"
+                : mp.scopes.includes("org")
+                  ? "org"
+                  : "instance";
+              const editableReg = mp.registrations.get(editableScope)!;
+              
+              // Disable toggle if all scopes are instance, or if only org and user is not admin
+              const hasInstance = mp.scopes.includes("instance");
+              const hasOnlyOrg = mp.scopes.length === 1 && mp.scopes[0] === "org";
+              const toggleDisabled =
+                hasInstance || (hasOnlyOrg && !isAdminOrOwner);
+              
+              return (
+                <tr
+                  key={mp.name}
+                  className="border-t border-tertiary/60 transition-colors hover:bg-base-secondary/40"
                 >
-                  <span className="block truncate">{mp.name}</span>
-                </td>
-                <td className={cn(CELL_CLASS, "text-tertiary-alt")}>
-                  <span className="block truncate" title={mp.source}>
-                    {mp.source}
-                  </span>
-                </td>
-                <td className={cn(CELL_CLASS, "text-tertiary-alt")}>
-                  <span className="block truncate" title={mp.ref || undefined}>
-                    {mp.ref || "—"}
-                  </span>
-                </td>
-                <td className={cn(CELL_CLASS, "text-tertiary-alt")}>
-                  <span
-                    className="block truncate"
-                    title={mp.repo_path || undefined}
+                  <td
+                    className={cn(CELL_CLASS, "font-medium text-content-2")}
+                    title={mp.name}
                   >
-                    {mp.repo_path || "—"}
-                  </span>
-                </td>
-                <td className={CELL_CLASS}>
-                  <ScopeBadge scope={mp.scope ?? "personal"} />
-                </td>
-                <td className={CELL_CLASS}>
-                  <Toggle
-                    checked={!!mp.auto_load}
-                    disabled={
-                      mp.scope === "instance" ||
-                      (mp.scope === "org" && !isAdminOrOwner)
-                    }
-                    onClick={
-                      mp.scope !== "instance" &&
-                      (mp.scope === "personal" || isAdminOrOwner)
-                        ? () => onToggleAutoLoad(mp.name)
-                        : undefined
-                    }
-                    title={getAutoLoadTitle(mp.scope ?? "personal")}
-                    aria-label={`Toggle auto-load for ${mp.name}`}
-                  />
-                </td>
-                <td className={CELL_CLASS}>
-                  <div className="flex items-center justify-end gap-1">
-                    <button
-                      type="button"
-                      onClick={() => onEdit(mp)}
-                      disabled={!canEdit(mp)}
-                      title={canEdit(mp) ? t(I18nKey.BUTTON$EDIT) : undefined}
-                      aria-label={`${t(I18nKey.BUTTON$EDIT)} ${mp.name}`}
-                      className={cn(
-                        "rounded-md p-1.5 transition-colors",
-                        canEdit(mp)
-                          ? "text-tertiary-light hover:bg-white/10 hover:text-content-2"
-                          : "cursor-not-allowed text-tertiary-alt opacity-40",
-                      )}
+                    <span className="block truncate">{mp.name}</span>
+                  </td>
+                  <td className={cn(CELL_CLASS, "text-tertiary-alt")}>
+                    <span className="block truncate" title={mp.source}>
+                      {mp.source}
+                    </span>
+                  </td>
+                  <td className={cn(CELL_CLASS, "text-tertiary-alt")}>
+                    <span className="block truncate" title={mp.ref || undefined}>
+                      {mp.ref || "—"}
+                    </span>
+                  </td>
+                  <td className={cn(CELL_CLASS, "text-tertiary-alt")}>
+                    <span
+                      className="block truncate"
+                      title={mp.repo_path || undefined}
                     >
-                      <EditIcon width={16} height={16} />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => onDelete(mp)}
-                      disabled={!canEdit(mp)}
-                      title={canEdit(mp) ? t(I18nKey.BUTTON$DELETE) : undefined}
-                      aria-label={`${t(I18nKey.BUTTON$DELETE)} ${mp.name}`}
-                      className={cn(
-                        "rounded-md p-1.5 transition-colors",
-                        canEdit(mp)
-                          ? "text-danger hover:bg-danger/15"
-                          : "cursor-not-allowed text-tertiary-alt opacity-40",
-                      )}
-                    >
-                      <DeleteIcon width={16} height={16} />
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
+                      {mp.repo_path || "—"}
+                    </span>
+                  </td>
+                  <td className={CELL_CLASS}>
+                    <div className="flex flex-wrap gap-1.5">
+                      {mp.scopes.map((scope) => (
+                        <ScopeBadge key={scope} scope={scope} />
+                      ))}
+                    </div>
+                  </td>
+                  <td className={CELL_CLASS}>
+                    <Toggle
+                      checked={!!mp.auto_load}
+                      disabled={toggleDisabled}
+                      onClick={
+                        !toggleDisabled
+                          ? () => onToggleAutoLoad(mp.name)
+                          : undefined
+                      }
+                      title={getAutoLoadTitle(editableScope)}
+                      aria-label={`Toggle auto-load for ${mp.name}`}
+                    />
+                  </td>
+                  <td className={CELL_CLASS}>
+                    <div className="flex items-center justify-end gap-1">
+                      <button
+                        type="button"
+                        onClick={() => onEdit(editableReg)}
+                        disabled={!canEdit(editableReg)}
+                        title={
+                          canEdit(editableReg) ? t(I18nKey.BUTTON$EDIT) : undefined
+                        }
+                        aria-label={`${t(I18nKey.BUTTON$EDIT)} ${mp.name}`}
+                        className={cn(
+                          "rounded-md p-1.5 transition-colors",
+                          canEdit(editableReg)
+                            ? "text-tertiary-light hover:bg-white/10 hover:text-content-2"
+                            : "cursor-not-allowed text-tertiary-alt opacity-40",
+                        )}
+                      >
+                        <EditIcon width={16} height={16} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onDelete(editableReg)}
+                        disabled={!canEdit(editableReg)}
+                        title={
+                          canEdit(editableReg)
+                            ? t(I18nKey.BUTTON$DELETE)
+                            : undefined
+                        }
+                        aria-label={`${t(I18nKey.BUTTON$DELETE)} ${mp.name}`}
+                        className={cn(
+                          "rounded-md p-1.5 transition-colors",
+                          canEdit(editableReg)
+                            ? "text-danger hover:bg-danger/15"
+                            : "cursor-not-allowed text-tertiary-alt opacity-40",
+                        )}
+                      >
+                        <DeleteIcon width={16} height={16} />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
             {marketplaces.length === 0 && (
               <tr className="border-t border-tertiary/60">
                 <td
