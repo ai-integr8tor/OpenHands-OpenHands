@@ -633,3 +633,372 @@ class TestPatternMatchingEdgeCases:
                 provider_type='github',
             )
             assert len(result) == 0
+
+
+class TestUpsertAuthorization:
+    """Tests for upsert_authorization method."""
+
+    @pytest.mark.asyncio
+    async def test_upsert_creates_new_authorization(self, async_session_maker):
+        """Test upsert creates a new authorization when none exists."""
+        with patch(
+            'storage.user_authorization_store.a_session_maker', async_session_maker
+        ):
+            auth = await UserAuthorizationStore.upsert_authorization(
+                email_pattern='%@new.com',
+                provider_type=None,
+                auth_type=UserAuthorizationType.WHITELIST,
+            )
+
+            assert auth.email_pattern == '%@new.com'
+            assert auth.type == UserAuthorizationType.WHITELIST.value
+
+            # Verify it can be found
+            result = await UserAuthorizationStore.get_matching_authorizations(
+                email='user@new.com',
+                provider_type='github',
+            )
+            assert len(result) == 1
+
+    @pytest.mark.asyncio
+    async def test_upsert_does_not_duplicate(self, async_session_maker):
+        """Test upsert returns existing authorization without creating duplicate."""
+        with patch(
+            'storage.user_authorization_store.a_session_maker', async_session_maker
+        ):
+            # First upsert
+            auth1 = await UserAuthorizationStore.upsert_authorization(
+                email_pattern='%@existing.com',
+                provider_type=None,
+                auth_type=UserAuthorizationType.WHITELIST,
+            )
+
+            # Second upsert with same pattern/type
+            auth2 = await UserAuthorizationStore.upsert_authorization(
+                email_pattern='%@existing.com',
+                provider_type=None,
+                auth_type=UserAuthorizationType.WHITELIST,
+            )
+
+            # Should return the same authorization
+            assert auth1.id == auth2.id
+
+            # Should only have one record
+            all_whitelists = await UserAuthorizationStore.get_all_patterns_by_type(
+                UserAuthorizationType.WHITELIST
+            )
+            existing_whitelists = [
+                a for a in all_whitelists if a.email_pattern == '%@existing.com'
+            ]
+            assert len(existing_whitelists) == 1
+
+    @pytest.mark.asyncio
+    async def test_upsert_different_types_for_same_pattern(self, async_session_maker):
+        """Test upsert can create different types for same pattern."""
+        with patch(
+            'storage.user_authorization_store.a_session_maker', async_session_maker
+        ):
+            # Upsert as whitelist
+            auth1 = await UserAuthorizationStore.upsert_authorization(
+                email_pattern='%@both.com',
+                provider_type=None,
+                auth_type=UserAuthorizationType.WHITELIST,
+            )
+
+            # Upsert as blacklist with same pattern
+            auth2 = await UserAuthorizationStore.upsert_authorization(
+                email_pattern='%@both.com',
+                provider_type=None,
+                auth_type=UserAuthorizationType.BLACKLIST,
+            )
+
+            # Should have different IDs (different types)
+            assert auth1.id != auth2.id
+            assert auth1.type == UserAuthorizationType.WHITELIST.value
+            assert auth2.type == UserAuthorizationType.BLACKLIST.value
+
+
+class TestGetAuthorizationByPattern:
+    """Tests for get_authorization_by_pattern method."""
+
+    @pytest.mark.asyncio
+    async def test_get_existing_authorization(self, async_session_maker):
+        """Test getting an existing authorization by pattern and type."""
+        with patch(
+            'storage.user_authorization_store.a_session_maker', async_session_maker
+        ):
+            # Create an authorization
+            created = await UserAuthorizationStore.create_authorization(
+                email_pattern='%@findme.com',
+                provider_type=None,
+                auth_type=UserAuthorizationType.WHITELIST,
+            )
+
+            # Get it back
+            found = await UserAuthorizationStore.get_authorization_by_pattern(
+                email_pattern='%@findme.com',
+                auth_type=UserAuthorizationType.WHITELIST,
+            )
+
+            assert found is not None
+            assert found.id == created.id
+
+    @pytest.mark.asyncio
+    async def test_get_nonexistent_returns_none(self, async_session_maker):
+        """Test getting a non-existent authorization returns None."""
+        with patch(
+            'storage.user_authorization_store.a_session_maker', async_session_maker
+        ):
+            found = await UserAuthorizationStore.get_authorization_by_pattern(
+                email_pattern='%@notfound.com',
+                auth_type=UserAuthorizationType.WHITELIST,
+            )
+
+            assert found is None
+
+    @pytest.mark.asyncio
+    async def test_get_by_type_filters_correctly(self, async_session_maker):
+        """Test that type filter works when getting by pattern."""
+        with patch(
+            'storage.user_authorization_store.a_session_maker', async_session_maker
+        ):
+            # Create both whitelist and blacklist for same pattern
+            await UserAuthorizationStore.create_authorization(
+                email_pattern='%@dual.com',
+                provider_type=None,
+                auth_type=UserAuthorizationType.WHITELIST,
+            )
+            await UserAuthorizationStore.create_authorization(
+                email_pattern='%@dual.com',
+                provider_type=None,
+                auth_type=UserAuthorizationType.BLACKLIST,
+            )
+
+            # Get whitelist
+            whitelist = await UserAuthorizationStore.get_authorization_by_pattern(
+                email_pattern='%@dual.com',
+                auth_type=UserAuthorizationType.WHITELIST,
+            )
+            assert whitelist is not None
+            assert whitelist.type == UserAuthorizationType.WHITELIST.value
+
+            # Get blacklist
+            blacklist = await UserAuthorizationStore.get_authorization_by_pattern(
+                email_pattern='%@dual.com',
+                auth_type=UserAuthorizationType.BLACKLIST,
+            )
+            assert blacklist is not None
+            assert blacklist.type == UserAuthorizationType.BLACKLIST.value
+
+
+class TestGetAllPatternsByType:
+    """Tests for get_all_patterns_by_type method."""
+
+    @pytest.mark.asyncio
+    async def test_get_all_whitelists(self, async_session_maker):
+        """Test getting all whitelist patterns."""
+        with patch(
+            'storage.user_authorization_store.a_session_maker', async_session_maker
+        ):
+            # Create multiple whitelists
+            await UserAuthorizationStore.create_authorization(
+                email_pattern='%@a.com',
+                provider_type=None,
+                auth_type=UserAuthorizationType.WHITELIST,
+            )
+            await UserAuthorizationStore.create_authorization(
+                email_pattern='%@b.com',
+                provider_type=None,
+                auth_type=UserAuthorizationType.WHITELIST,
+            )
+            # Create a blacklist
+            await UserAuthorizationStore.create_authorization(
+                email_pattern='%@c.com',
+                provider_type=None,
+                auth_type=UserAuthorizationType.BLACKLIST,
+            )
+
+            whitelists = await UserAuthorizationStore.get_all_patterns_by_type(
+                UserAuthorizationType.WHITELIST
+            )
+
+            assert len(whitelists) == 2
+            patterns = {w.email_pattern for w in whitelists}
+            assert patterns == {'%@a.com', '%@b.com'}
+
+    @pytest.mark.asyncio
+    async def test_get_all_blacklists(self, async_session_maker):
+        """Test getting all blacklist patterns."""
+        with patch(
+            'storage.user_authorization_store.a_session_maker', async_session_maker
+        ):
+            # Create multiple blacklists
+            await UserAuthorizationStore.create_authorization(
+                email_pattern='%@blocked1.com',
+                provider_type=None,
+                auth_type=UserAuthorizationType.BLACKLIST,
+            )
+            await UserAuthorizationStore.create_authorization(
+                email_pattern='%@blocked2.com',
+                provider_type=None,
+                auth_type=UserAuthorizationType.BLACKLIST,
+            )
+
+            blacklists = await UserAuthorizationStore.get_all_patterns_by_type(
+                UserAuthorizationType.BLACKLIST
+            )
+
+            assert len(blacklists) == 2
+
+    @pytest.mark.asyncio
+    async def test_get_all_returns_empty_for_nonexistent_type(
+        self, async_session_maker
+    ):
+        """Test getting all patterns of a type that doesn't exist returns empty list."""
+        with patch(
+            'storage.user_authorization_store.a_session_maker', async_session_maker
+        ):
+            result = await UserAuthorizationStore.get_all_patterns_by_type(
+                UserAuthorizationType.WHITELIST
+            )
+
+            assert result == []
+
+
+class TestReconcileFromEnvironment:
+    """Tests for reconcile_from_environment method."""
+
+    @pytest.mark.asyncio
+    async def test_reconcile_adds_whitelist_patterns(self, async_session_maker):
+        """Test reconcile adds whitelist patterns from environment variable."""
+        with (
+            patch(
+                'storage.user_authorization_store.a_session_maker', async_session_maker
+            ),
+            patch.dict(
+                'os.environ',
+                {'EMAIL_PATTERN_WHITELIST': '%@reconcile.com'},
+            ),
+        ):
+            stats = await UserAuthorizationStore.reconcile_from_environment()
+
+            assert stats['whitelists_added'] == 1
+            assert stats['blacklists_added'] == 0
+
+            # Verify it was added
+            result = await UserAuthorizationStore.get_matching_authorizations(
+                email='user@reconcile.com',
+                provider_type='github',
+            )
+            assert len(result) == 1
+            assert result[0].type == UserAuthorizationType.WHITELIST.value
+
+    @pytest.mark.asyncio
+    async def test_reconcile_adds_blacklist_patterns(self, async_session_maker):
+        """Test reconcile adds blacklist patterns from environment variable."""
+        with (
+            patch(
+                'storage.user_authorization_store.a_session_maker', async_session_maker
+            ),
+            patch.dict(
+                'os.environ',
+                {'EMAIL_PATTERN_BLACKLIST': '%@block.com'},
+            ),
+        ):
+            stats = await UserAuthorizationStore.reconcile_from_environment()
+
+            assert stats['whitelists_added'] == 0
+            assert stats['blacklists_added'] == 1
+
+            # Verify it was added
+            auth_type = await UserAuthorizationStore.get_authorization_type(
+                email='user@block.com',
+                provider_type='github',
+            )
+            assert auth_type == UserAuthorizationType.BLACKLIST
+
+    @pytest.mark.asyncio
+    async def test_reconcile_handles_multiple_patterns(self, async_session_maker):
+        """Test reconcile handles comma-separated patterns."""
+        with (
+            patch(
+                'storage.user_authorization_store.a_session_maker', async_session_maker
+            ),
+            patch.dict(
+                'os.environ',
+                {
+                    'EMAIL_PATTERN_WHITELIST': '%@a.com,%@b.com',
+                    'EMAIL_PATTERN_BLACKLIST': '%@c.com,%@d.com',
+                },
+            ),
+        ):
+            stats = await UserAuthorizationStore.reconcile_from_environment()
+
+            assert stats['whitelists_added'] == 2
+            assert stats['blacklists_added'] == 2
+
+    @pytest.mark.asyncio
+    async def test_reconcile_is_idempotent(self, async_session_maker):
+        """Test reconcile is idempotent - doesn't create duplicates."""
+        with (
+            patch(
+                'storage.user_authorization_store.a_session_maker', async_session_maker
+            ),
+            patch.dict(
+                'os.environ',
+                {'EMAIL_PATTERN_WHITELIST': '%@idempotent.com'},
+            ),
+        ):
+            # Run reconcile twice
+            await UserAuthorizationStore.reconcile_from_environment()
+            await UserAuthorizationStore.reconcile_from_environment()
+
+            # Should only have one record
+            all_whitelists = await UserAuthorizationStore.get_all_patterns_by_type(
+                UserAuthorizationType.WHITELIST
+            )
+            idempotent_whitelists = [
+                a for a in all_whitelists if a.email_pattern == '%@idempotent.com'
+            ]
+            assert len(idempotent_whitelists) == 1
+
+    @pytest.mark.asyncio
+    async def test_reconcile_handles_empty_env_vars(self, async_session_maker):
+        """Test reconcile handles empty environment variables."""
+        with (
+            patch(
+                'storage.user_authorization_store.a_session_maker', async_session_maker
+            ),
+            patch.dict(
+                'os.environ',
+                {'EMAIL_PATTERN_WHITELIST': '', 'EMAIL_PATTERN_BLACKLIST': ''},
+            ),
+        ):
+            stats = await UserAuthorizationStore.reconcile_from_environment()
+
+            assert stats['whitelists_added'] == 0
+            assert stats['blacklists_added'] == 0
+
+    @pytest.mark.asyncio
+    async def test_reconcile_handles_whitespace_in_patterns(self, async_session_maker):
+        """Test reconcile handles whitespace in comma-separated patterns."""
+        with (
+            patch(
+                'storage.user_authorization_store.a_session_maker', async_session_maker
+            ),
+            patch.dict(
+                'os.environ',
+                {'EMAIL_PATTERN_WHITELIST': ' %@space.com , %@space2.com ,'},
+            ),
+        ):
+            stats = await UserAuthorizationStore.reconcile_from_environment()
+
+            # Should trim whitespace and ignore empty entries
+            assert stats['whitelists_added'] == 2
+
+            # Verify patterns were added without whitespace
+            result = await UserAuthorizationStore.get_matching_authorizations(
+                email='user@space.com',
+                provider_type='github',
+            )
+            assert len(result) == 1

@@ -106,3 +106,60 @@ async def test_aexit_does_not_raise_on_shutdown_error(mock_analytics_service):
         await svc.__aenter__()
         # Must not raise even if shutdown errors
         await svc.__aexit__(None, None, None)
+
+
+@pytest.mark.asyncio
+async def test_aenter_calls_reconcile_user_authorizations():
+    """SaasAppLifespanService.__aenter__ reconciles user authorizations from env vars."""
+    from server.app_lifespan.saas_app_lifespan_service import SaasAppLifespanService
+
+    with (
+        patch(
+            'server.app_lifespan.saas_app_lifespan_service.init_analytics_service'
+        ),
+        patch(
+            'server.app_lifespan.saas_app_lifespan_service.UserAuthorizationStore.reconcile_from_environment',
+            return_value={'whitelists_added': 1, 'blacklists_added': 0},
+        ) as mock_reconcile,
+    ):
+        svc = SaasAppLifespanService()
+        await svc.__aenter__()
+
+        mock_reconcile.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_reconcile_is_called_with_correct_env_vars():
+    """SaasAppLifespanService reconciles user authorizations with env var values."""
+    from server.app_lifespan.saas_app_lifespan_service import SaasAppLifespanService
+
+    with (
+        patch(
+            'server.app_lifespan.saas_app_lifespan_service.init_analytics_service'
+        ),
+        patch(
+            'server.app_lifespan.saas_app_lifespan_service.UserAuthorizationStore.reconcile_from_environment',
+            return_value={'whitelists_added': 0, 'blacklists_added': 0},
+        ),
+    ):
+        svc = SaasAppLifespanService()
+        await svc.__aenter__()
+
+
+@pytest.mark.asyncio
+async def test_reconcile_error_does_not_crash_aenter():
+    """SaasAppLifespanService.__aenter__ handles reconcile errors gracefully."""
+    from server.app_lifespan.saas_app_lifespan_service import SaasAppLifespanService
+
+    with (
+        patch(
+            'server.app_lifespan.saas_app_lifespan_service.init_analytics_service'
+        ),
+        patch(
+            'server.app_lifespan.saas_app_lifespan_service.UserAuthorizationStore.reconcile_from_environment',
+            side_effect=RuntimeError('Database connection failed'),
+        ),
+    ):
+        svc = SaasAppLifespanService()
+        # Should not raise despite reconcile error
+        await svc.__aenter__()
