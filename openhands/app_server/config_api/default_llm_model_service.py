@@ -25,6 +25,7 @@ from openhands.app_server.config_api.llm_model_service import (
 from openhands.app_server.services.injector import InjectorState
 from openhands.app_server.utils.async_utils import call_sync_from_async
 from openhands.app_server.utils.llm import (
+    OMNIROUTE_DEFAULT_BASE_URL,
     ModelsResponse,
     get_supported_llm_models,
 )
@@ -110,16 +111,18 @@ def _to_providers(models_response: ModelsResponse) -> list[Provider]:
 
 
 class DefaultLLMModelService(LLMModelService):
-    """Model discovery via litellm catalogue, optional Bedrock, and optional Ollama."""
+    """Model discovery via litellm catalogue, optional Bedrock, optional Ollama, and optional OmniRoute."""
 
     def __init__(
         self,
         *,
         bedrock_client: Any | None = None,
         ollama_base_url: str | None = None,
+        omniroute_base_url: str | None = None,
     ) -> None:
         self._bedrock_client = bedrock_client
         self._ollama_base_url = ollama_base_url
+        self._omniroute_base_url = omniroute_base_url
         self._cached_response: ModelsResponse | None = None
 
     def _list_foundation_models(self) -> list[str]:
@@ -173,6 +176,24 @@ class DefaultLLMModelService(LLMModelService):
                 extra_models.extend('ollama/' + m['name'] for m in ollama_models_list)
             except httpx.HTTPError as e:
                 _logger.error(f'Error getting OLLAMA models: {e}')
+
+        if self._omniroute_base_url:
+            omniroute_url = self._omniroute_base_url.strip('/') + '/v1/models'
+            try:
+                async with httpx.AsyncClient() as client:
+                    resp = await client.get(omniroute_url, timeout=3)
+                    data = resp.json()
+                    models = data.get('data', [])
+                extra_models.extend(
+                    'omniroute/' + m['id'] for m in models if m.get('id')
+                )
+            except httpx.HTTPError as e:
+                _logger.warning(f'Error getting OmniRoute models: {e}')
+
+        # Always include the OmniRoute smart-routing fallback so the provider
+        # is selectable even when the local server is not running. ``get_supported_llm_models``
+        # deduplicates, so this is safe even when discovery returns the same id.
+        extra_models.append('omniroute/auto')
 
         self._cached_response = get_supported_llm_models(
             verified_models=verified_models,
@@ -236,7 +257,7 @@ class DefaultLLMModelService(LLMModelService):
 
 
 class DefaultLLMModelServiceInjector(LLMModelServiceInjector):
-    """Injector that reads AWS / Ollama credentials from its own fields.
+    """Injector that reads AWS / Ollama / OmniRoute credentials from its own fields.
 
     When AWS credentials are provided, a ``boto3`` Bedrock client is created
     once and passed to every service instance, avoiding repeated credential
@@ -249,6 +270,10 @@ class DefaultLLMModelServiceInjector(LLMModelServiceInjector):
     ollama_base_url: str | None = Field(
         default=None,
         description='Base URL for a local Ollama instance (e.g. http://localhost:11434)',
+    )
+    omniroute_base_url: str | None = Field(
+        default=OMNIROUTE_DEFAULT_BASE_URL,
+        description='Base URL for an OmniRoute instance (e.g. http://localhost:20128/v1)',
     )
 
     _bedrock_client: Any | None = None
@@ -277,4 +302,5 @@ class DefaultLLMModelServiceInjector(LLMModelServiceInjector):
         yield DefaultLLMModelService(
             bedrock_client=self._get_bedrock_client(),
             ollama_base_url=self.ollama_base_url,
+            omniroute_base_url=self.omniroute_base_url,
         )

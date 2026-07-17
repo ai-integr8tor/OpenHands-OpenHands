@@ -76,6 +76,7 @@ const getSchemaFieldDefaultValue = (
 
 const KNOWN_PROVIDER_DEFAULT_BASE_URLS: Partial<Record<string, Set<string>>> = {
   openai: new Set(["https://api.openai.com", "https://api.openai.com/v1"]),
+  omniroute: new Set(["http://localhost:20128/v1"]),
 };
 
 const normalizeBaseUrl = (baseUrl: string) => {

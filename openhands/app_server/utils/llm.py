@@ -1,4 +1,5 @@
 import warnings
+from typing import Final
 
 from pydantic import BaseModel
 
@@ -106,6 +107,31 @@ def is_openhands_model(model: str | None) -> bool:
     return bool(model and model.startswith('openhands/'))
 
 
+OMNIROUTE_PROVIDER_PREFIX: Final[str] = 'omniroute/'
+OMNIROUTE_DEFAULT_BASE_URL: Final[str] = 'http://localhost:20128/v1'
+
+
+def is_omniroute_model(model: str | None) -> bool:
+    """Return True when the model uses the OmniRoute provider prefix."""
+    return bool(model and model.startswith(OMNIROUTE_PROVIDER_PREFIX))
+
+
+def resolve_omniroute_model(model: str) -> tuple[str, str | None]:
+    """Return the OpenAI-facing model name and original OmniRoute name.
+
+    litellm does not know the ``omniroute`` provider, so we rewrite the
+    request to ``openai/<model>`` and route it through the OmniRoute base URL.
+    The original name is returned as ``model_canonical_name`` so the UI and
+    conversation metadata stay consistent.
+    """
+    if is_omniroute_model(model):
+        return (
+            f'openai/{model.removeprefix(OMNIROUTE_PROVIDER_PREFIX)}',
+            model,
+        )
+    return model, None
+
+
 # Canonical masked placeholder for LLM API keys. Matches pydantic's
 # ``SecretStr`` default representation so request/response payloads that pass
 # through ``model_dump(mode='json')`` stay consistent with payloads that the
@@ -162,6 +188,9 @@ def resolve_llm_base_url(
 def get_provider_api_base(model: str) -> str | None:
     """Get the API base URL for a model using litellm.
 
+    OmniRoute is OpenAI-compatible but not a litellm-native provider, so its
+    default base URL is resolved locally before falling back to litellm.
+
     This function tries multiple approaches to determine the API base URL:
     1. First tries litellm.get_api_base() which handles OpenAI, Gemini, Mistral
     2. Falls back to ProviderConfigManager.get_provider_model_info() for providers
@@ -173,6 +202,8 @@ def get_provider_api_base(model: str) -> str | None:
     Returns:
         The API base URL if found, None otherwise.
     """
+    if is_omniroute_model(model):
+        return OMNIROUTE_DEFAULT_BASE_URL
     # First try get_api_base (handles OpenAI, Gemini with specific URL patterns)
     try:
         api_base = litellm.get_api_base(model, {})

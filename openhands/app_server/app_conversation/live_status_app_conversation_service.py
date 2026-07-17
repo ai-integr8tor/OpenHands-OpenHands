@@ -112,6 +112,11 @@ from openhands.app_server.utils.docker_utils import (
 )
 from openhands.app_server.utils.git import ensure_valid_git_branch_name
 from openhands.app_server.utils.import_utils import get_impl
+from openhands.app_server.utils.llm import (
+    OMNIROUTE_DEFAULT_BASE_URL,
+    is_omniroute_model,
+    resolve_omniroute_model,
+)
 from openhands.app_server.utils.llm_metadata import (
     get_llm_metadata,
     should_set_litellm_extra_body,
@@ -587,7 +592,16 @@ class LiveStatusAppConversationService(AppConversationServiceBase):
                         launch_snapshot.user.agent_settings.acp_server
                     )
             else:
-                llm_model = request_agent.llm.model
+                # Use the canonical name when it is a real string (e.g. OmniRoute
+                # keeps its original provider name for display while the runtime
+                # model is OpenAI-facing).
+                canonical_name = getattr(
+                    request_agent.llm, 'model_canonical_name', None
+                )
+                if isinstance(canonical_name, str):
+                    llm_model = canonical_name
+                else:
+                    llm_model = request_agent.llm.model
                 agent_kind = 'openhands'
 
             conversation_tags: dict[str, str] = dict(tags)
@@ -1266,28 +1280,33 @@ class LiveStatusAppConversationService(AppConversationServiceBase):
         Returns:
             Configured LLM instance
         """
-        model: str = (
+        original_model: str = (
             llm_model
             or user.agent_settings.llm.model
             or LLM.model_fields['model'].default
         )
 
         base_url = resolve_provider_llm_base_url(
-            model,
+            original_model,
             user.agent_settings.llm.base_url,
             provider_base_url=self.openhands_provider_base_url,
         )
+        if is_omniroute_model(original_model) and not base_url:
+            base_url = OMNIROUTE_DEFAULT_BASE_URL
 
-        return user.agent_settings.llm.model_copy(
-            update={
-                'model': model,
-                'base_url': base_url,
-                'api_key': user.agent_settings.llm.api_key,
-                'usage_id': 'agent',
-                # Force streaming on (the SDK LLM defaults stream=False).
-                'stream': True,
-            }
-        )
+        runtime_model, canonical_name = resolve_omniroute_model(original_model)
+        update: dict[str, Any] = {
+            'model': runtime_model,
+            'base_url': base_url,
+            'api_key': user.agent_settings.llm.api_key,
+            'usage_id': 'agent',
+            # Force streaming on (the SDK LLM defaults stream=False).
+            'stream': True,
+        }
+        if canonical_name is not None:
+            update['model_canonical_name'] = canonical_name
+
+        return user.agent_settings.llm.model_copy(update=update)
 
     async def _add_system_mcp_servers(
         self, mcp_servers: dict[str, MCPServer], conversation_id: UUID

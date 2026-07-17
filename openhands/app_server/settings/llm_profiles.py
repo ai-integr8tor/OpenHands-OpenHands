@@ -14,7 +14,11 @@ from pydantic import (
     model_validator,
 )
 
-from openhands.app_server.utils.llm import resolve_llm_base_url
+from openhands.app_server.utils.llm import (
+    is_omniroute_model,
+    resolve_llm_base_url,
+    resolve_omniroute_model,
+)
 from openhands.app_server.utils.logger import openhands_logger as logger
 from openhands.sdk.llm import LLM
 
@@ -48,17 +52,21 @@ def resolve_profile_llm(
     without the fallback the agent server would call the LiteLLM proxy with no
     credentials; BYOR profiles keep their own key (the fallback is skipped).
     """
-    resolved = profile_llm.model_copy(
-        update={
-            'base_url': resolve_llm_base_url(
-                model=profile_llm.model,
-                base_url=profile_llm.base_url,
-                managed_proxy_url=managed_proxy_url,
-            ),
-            # Force streaming on (profiles default to the SDK's stream=False).
-            'stream': True,
-        }
+    resolved_base_url = resolve_llm_base_url(
+        model=profile_llm.model,
+        base_url=profile_llm.base_url,
+        managed_proxy_url=managed_proxy_url,
     )
+    update: dict[str, Any] = {
+        'base_url': resolved_base_url,
+        # Force streaming on (profiles default to the SDK's stream=False).
+        'stream': True,
+    }
+    if is_omniroute_model(profile_llm.model):
+        runtime_model, canonical_name = resolve_omniroute_model(profile_llm.model)
+        update['model'] = runtime_model
+        update['model_canonical_name'] = canonical_name
+    resolved = profile_llm.model_copy(update=update)
     if not has_real_api_key(resolved.api_key) and has_real_api_key(fallback_api_key):
         resolved = resolved.model_copy(update={'api_key': fallback_api_key})
     return resolved
