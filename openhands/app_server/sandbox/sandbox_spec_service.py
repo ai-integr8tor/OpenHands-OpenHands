@@ -146,6 +146,9 @@ def is_custom_sandbox_spec(sandbox_spec_id: str) -> bool:
     return sandbox_spec_id != _bundled_default_image()
 
 
+# Exact environment variables that should be auto-forwarded to agent-server.
+AUTO_FORWARD_VARIABLES = ('ALLOW_INSECURE_GIT_ACCESS',)
+
 # Prefixes for environment variables that should be auto-forwarded to agent-server
 # These are typically configuration variables that affect the agent's behavior
 AUTO_FORWARD_PREFIXES = ('LLM_', 'LMNR_')
@@ -156,11 +159,12 @@ def get_agent_server_env() -> dict[str, str]:
 
     This function combines two sources of environment variables:
 
-    1. **Auto-forwarded variables**: Environment variables with certain prefixes
-       (e.g., LLM_*, LMNR_*) are automatically forwarded to the agent-server container.
+    1. **Auto-forwarded variables**: Selected variables and variables with certain
+       prefixes (e.g., ALLOW_INSECURE_GIT_ACCESS, LLM_*, LMNR_*) are automatically
+       forwarded to the agent-server container.
        This ensures that LLM configuration like timeouts and retry settings
        work correctly in the two-container V1 architecture, as well as
-       Laminar monitoring/analytics configuration.
+       Laminar monitoring/analytics configuration and git access flags.
 
     2. **Explicit overrides via OH_AGENT_SERVER_ENV**: A JSON string that allows
        setting arbitrary environment variables in the agent-server container.
@@ -197,12 +201,17 @@ def get_agent_server_env() -> dict[str, str]:
     """
     result: dict[str, str] = {}
 
-    # Step 1: Auto-forward environment variables with recognized prefixes
+    # Step 1: Auto-forward selected exact environment variables.
+    for key in AUTO_FORWARD_VARIABLES:
+        if key in os.environ:
+            result[key] = os.environ[key]
+
+    # Step 2: Auto-forward environment variables with recognized prefixes
     for key, value in os.environ.items():
         if any(key.startswith(prefix) for prefix in AUTO_FORWARD_PREFIXES):
             result[key] = value
 
-    # Step 2: Apply explicit overrides from OH_AGENT_SERVER_ENV
+    # Step 3: Apply explicit overrides from OH_AGENT_SERVER_ENV
     # These take precedence over auto-forwarded variables
     explicit_env = env_parser.from_env(dict[str, str], 'OH_AGENT_SERVER_ENV')
     result.update(explicit_env)
