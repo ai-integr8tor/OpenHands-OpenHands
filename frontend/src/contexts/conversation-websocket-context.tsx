@@ -120,6 +120,8 @@ export function ConversationWebSocketProvider({
   const [expectedEventCountPlanning, setExpectedEventCountPlanning] = useState<
     number | null
   >(null);
+  const queuedMainMessagesRef = useRef<V1SendMessageRequest[]>([]);
+  const queuedPlanningMessagesRef = useRef<V1SendMessageRequest[]>([]);
 
   const { setPlanContent } = useConversationStore();
 
@@ -335,7 +337,30 @@ export function ConversationWebSocketProvider({
     receivedEventCountRefMain.current = 0;
     // Reset the tracked event ref when conversation changes
     latestPlanningFileEventRef.current = null;
+    queuedMainMessagesRef.current = [];
+    queuedPlanningMessagesRef.current = [];
   }, [conversationId]);
+
+  const flushQueuedMessages = useCallback(
+    (
+      socket: WebSocket,
+      queuedMessagesRef: React.MutableRefObject<V1SendMessageRequest[]>,
+    ) => {
+      if (
+        socket.readyState !== WebSocket.OPEN ||
+        queuedMessagesRef.current.length === 0
+      ) {
+        return;
+      }
+
+      const queuedMessages = queuedMessagesRef.current.splice(0);
+
+      queuedMessages.forEach((queuedMessage) => {
+        socket.send(JSON.stringify(queuedMessage));
+      });
+    },
+    [],
+  );
 
   const { data: preloadedEvents, isFetched: isHistoryFetched } =
     useConversationHistory(conversationId);
@@ -873,6 +898,18 @@ export function ConversationWebSocketProvider({
     planningWebsocketOptions,
   );
 
+  useEffect(() => {
+    if (mainSocket) {
+      flushQueuedMessages(mainSocket, queuedMainMessagesRef);
+    }
+  }, [mainSocket, connectionState, flushQueuedMessages]);
+
+  useEffect(() => {
+    if (planningAgentSocket) {
+      flushQueuedMessages(planningAgentSocket, queuedPlanningMessagesRef);
+    }
+  }, [planningAgentSocket, connectionState, flushQueuedMessages]);
+
   // V1 send message function via WebSocket
   // Falls back to REST API queue when WebSocket is not connected
   const sendMessage = useCallback(
@@ -880,14 +917,24 @@ export function ConversationWebSocketProvider({
       const currentMode = useConversationStore.getState().conversationMode;
       const currentSocket =
         currentMode === "plan" ? planningAgentSocket : mainSocket;
+      const isTaskConversationId = conversationId?.startsWith("task-");
 
       if (!currentSocket || currentSocket.readyState !== WebSocket.OPEN) {
-        // WebSocket not connected - queue message via REST API
-        // Message will be delivered automatically when conversation becomes ready
         if (!conversationId) {
           const error = new Error("No conversation ID available");
           setErrorMessage(error.message);
           throw error;
+        }
+
+        // During task startup flow, queue server-side so messages survive URL transition.
+        // Once we have a real conversation ID, queue in-memory and flush on socket open.
+        if (!isTaskConversationId) {
+          if (currentMode === "plan") {
+            queuedPlanningMessagesRef.current.push(message);
+          } else {
+            queuedMainMessagesRef.current.push(message);
+          }
+          return { queued: true };
         }
 
         try {
