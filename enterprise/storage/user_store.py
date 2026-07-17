@@ -163,7 +163,9 @@ class UserStore:
                 **user_kwargs,
             )
             user.email = user_info.get('email')
-            user.email_verified = user_info.get('email_verified')
+            user.email_verified = user_info.get('email_verified') or bool(
+                user_info.get('identity_provider')
+            )
             session.add(user)
 
             role = await RoleStore.get_role_by_name('owner')
@@ -733,11 +735,16 @@ class UserStore:
     @staticmethod
     async def get_user_by_id(user_id: str) -> Optional[User]:
         """Get user by Keycloak user ID."""
+        try:
+            user_uuid = uuid.UUID(user_id)
+        except ValueError:
+            return None
+
         async with a_session_maker() as session:
             result = await session.execute(
                 select(User)
                 .options(selectinload(User.org_members))
-                .filter(User.id == uuid.UUID(user_id))
+                .filter(User.id == user_uuid)
             )
             user = result.scalars().first()
             if user:
@@ -1135,7 +1142,9 @@ class UserStore:
                 updated = True
 
             if user.email_verified is None:
-                user.email_verified = user_info.get('email_verified', False)
+                user.email_verified = user_info.get('email_verified', False) or bool(
+                    user_info.get('identity_provider')
+                )
                 updated = True
 
             if updated:
