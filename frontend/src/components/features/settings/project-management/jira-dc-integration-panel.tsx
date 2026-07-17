@@ -410,7 +410,10 @@ export function JiraDcIntegrationPanel() {
 
   const colHead =
     "px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider";
-  const showServerAndServiceAccountSection = !serviceAccountManaged;
+  // Also show the section's host input when no host exists yet (email + managed
+  // SA + first-time); otherwise it's hidden and Connect stays disabled (#15150).
+  const showServerAndServiceAccountSection =
+    !serviceAccountManaged || !hostLocked;
 
   const serverAndServiceAccountSection = (
     <div className="flex flex-col gap-3">
