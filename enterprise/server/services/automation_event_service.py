@@ -212,14 +212,25 @@ class AutomationEventService:
         # Try to resolve via OrgGitClaim
         org_id = await self._resolve_git_org(provider, git_org_name)
 
-        # Fallback for personal repos (owner_type indicates individual user)
+        # Fallback for personal repos (owner_type indicates individual user).
+        # Skipped while personal workspaces are hidden: dispatching there
+        # would run automations (and spend) in a workspace the owner can no
+        # longer see. The default-org fallback below routes the event to the
+        # visible org instead; unhiding restores the personal routing.
         if not org_id and owner_type == 'User':
-            org_id = await self._resolve_personal_org(provider, owner_id)
-            if org_id:
+            if get_default_org_config().hide_personal_workspaces:
                 logger.info(
-                    f'[AutomationEventService] Resolved personal repo owner '
-                    f'{git_org_name} to personal org {org_id} ({provider.value})'
+                    f'[AutomationEventService] Personal workspaces are hidden; '
+                    f'skipping personal-org resolution for {git_org_name} '
+                    f'({provider.value})'
                 )
+            else:
+                org_id = await self._resolve_personal_org(provider, owner_id)
+                if org_id:
+                    logger.info(
+                        f'[AutomationEventService] Resolved personal repo owner '
+                        f'{git_org_name} to personal org {org_id} ({provider.value})'
+                    )
 
         # Fallback for single-org installs with a bootstrapped default org:
         # route unclaimed repos there instead of dropping the event. Claims

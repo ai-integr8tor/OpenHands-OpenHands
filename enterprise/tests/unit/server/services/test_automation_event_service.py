@@ -1378,3 +1378,112 @@ class TestResolveDefaultOrgFallback:
             assert context is not None
             assert context.org_id == org.id
             assert context.git_org == 'PROJ'
+
+
+class TestPersonalOrgSkippedWhenPersonalWorkspacesHidden:
+    """Personal-repo events skip personal-org dispatch while hiding is on.
+
+    Dispatching would run automations (and spend) in a workspace the owner
+    can no longer see; the default-org fallback picks the event up instead.
+    """
+
+    @pytest.mark.asyncio
+    async def test_personal_repo_skips_personal_org_when_hiding_on(
+        self, mock_token_manager, github_user_payload, monkeypatch
+    ):
+        monkeypatch.setenv('HIDE_PERSONAL_WORKSPACES', 'true')
+        mock_redis = AsyncMock()
+        mock_redis.get = AsyncMock(return_value=None)
+        mock_redis.setex = AsyncMock()
+
+        with (
+            patch(
+                'server.services.automation_event_service.resolve_org_for_repo',
+                new_callable=AsyncMock,
+                return_value=None,  # No claim
+            ),
+            patch(
+                'server.services.automation_event_service.OrgStore'
+            ) as mock_org_store,
+            patch(REDIS_PATCH, return_value=mock_redis),
+        ):
+            # No default org configured either: the event should drop without
+            # ever consulting the personal-org resolution.
+            monkeypatch.delenv('OPENHANDS_DEFAULT_ORG_ENABLED', raising=False)
+            mock_org_store.get_default_org = AsyncMock()
+            service = create_service(mock_token_manager)
+            with patch.object(
+                service, '_resolve_personal_org', new_callable=AsyncMock
+            ) as mock_personal:
+                context = await service._resolve_org_context(
+                    ProviderType.GITHUB, github_user_payload
+                )
+
+            assert context is None
+            mock_personal.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_personal_repo_routes_to_default_org_when_hiding_on(
+        self, mock_token_manager, github_user_payload, monkeypatch
+    ):
+        monkeypatch.setenv('HIDE_PERSONAL_WORKSPACES', 'true')
+        monkeypatch.setenv('OPENHANDS_DEFAULT_ORG_ENABLED', 'true')
+        org = MagicMock()
+        org.id = uuid.UUID('87654321-4321-8765-4321-876543218765')
+        mock_redis = AsyncMock()
+        mock_redis.get = AsyncMock(return_value=None)
+        mock_redis.setex = AsyncMock()
+
+        with (
+            patch(
+                'server.services.automation_event_service.resolve_org_for_repo',
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+            patch(
+                'server.services.automation_event_service.OrgStore'
+            ) as mock_org_store,
+            patch(REDIS_PATCH, return_value=mock_redis),
+        ):
+            mock_org_store.get_default_org = AsyncMock(return_value=org)
+            mock_org_store.count_team_orgs = AsyncMock(return_value=1)
+            service = create_service(mock_token_manager)
+            context = await service._resolve_org_context(
+                ProviderType.GITHUB, github_user_payload
+            )
+
+            assert context is not None
+            assert context.org_id == org.id
+
+    @pytest.mark.asyncio
+    async def test_personal_repo_resolves_personal_org_when_hiding_off(
+        self, mock_token_manager, github_user_payload, monkeypatch
+    ):
+        monkeypatch.delenv('HIDE_PERSONAL_WORKSPACES', raising=False)
+        personal_org_id = uuid.uuid4()
+        mock_redis = AsyncMock()
+        mock_redis.get = AsyncMock(return_value=None)
+        mock_redis.setex = AsyncMock()
+
+        with (
+            patch(
+                'server.services.automation_event_service.resolve_org_for_repo',
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+            patch(REDIS_PATCH, return_value=mock_redis),
+        ):
+            service = create_service(mock_token_manager)
+            with patch.object(
+                service,
+                '_resolve_personal_org',
+                new_callable=AsyncMock,
+                return_value=personal_org_id,
+            ) as mock_personal:
+                context = await service._resolve_org_context(
+                    ProviderType.GITHUB, github_user_payload
+                )
+
+            mock_personal.assert_awaited_once()
+            assert context is not None
+            assert context.org_id == personal_org_id
