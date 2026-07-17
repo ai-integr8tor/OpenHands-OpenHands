@@ -192,6 +192,18 @@ class V1ConversationService {
     conversationUrl: string | null | undefined,
     sessionApiKey?: string | null,
   ): Promise<{ success: boolean }> {
+    // When the centralized WebSocket gateway is enabled, route pause
+    // through the app-server proxy (just like sendMessage does).
+    const useGateway = import.meta.env.VITE_ENABLE_WEBSOCKET_GATEWAY === "true";
+
+    if (useGateway) {
+      const { data } = await openHands.post<{ success: boolean }>(
+        `/api/conversations/${conversationId}/pause`,
+        {},
+      );
+      return data;
+    }
+
     const url = this.buildRuntimeUrl(
       conversationUrl,
       `/api/conversations/${conversationId}/interrupt`,
@@ -220,6 +232,18 @@ class V1ConversationService {
     question: string,
     sessionApiKey?: string | null,
   ): Promise<{ response: string }> {
+    // When the centralized WebSocket gateway is enabled, route ask_agent
+    // through the app-server proxy (just like pause does).
+    const useGateway = import.meta.env.VITE_ENABLE_WEBSOCKET_GATEWAY === "true";
+
+    if (useGateway) {
+      const { data } = await openHands.post<{ response: string }>(
+        `/api/conversations/${conversationId}/ask_agent`,
+        { question },
+      );
+      return data;
+    }
+
     const url = this.buildRuntimeUrl(
       conversationUrl,
       `/api/conversations/${conversationId}/ask_agent`,
@@ -274,6 +298,18 @@ class V1ConversationService {
     conversationUrl: string | null | undefined,
     sessionApiKey?: string | null,
   ): Promise<{ success: boolean }> {
+    // When the centralized WebSocket gateway is enabled, route resume
+    // through the app-server proxy (just like pause does).
+    const useGateway = import.meta.env.VITE_ENABLE_WEBSOCKET_GATEWAY === "true";
+
+    if (useGateway) {
+      const { data } = await openHands.post<{ success: boolean }>(
+        `/api/conversations/${conversationId}/run`,
+        {},
+      );
+      return data;
+    }
+
     const url = this.buildRuntimeUrl(
       conversationUrl,
       `/api/conversations/${conversationId}/run`,
