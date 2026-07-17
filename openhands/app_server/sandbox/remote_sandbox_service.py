@@ -238,6 +238,21 @@ class RemoteSandboxService(SandboxService):
         stored_sandbox = result.scalar_one_or_none()
         return stored_sandbox
 
+    async def _release_db_transaction(self) -> None:
+        """Commit the session's current transaction (if any) before runtime API I/O.
+
+        The request-scoped session opens a transaction lazily on the first query
+        and otherwise holds it until the end of the request. Runtime API calls can
+        be slow, so making them with the transaction still open leaves the session
+        "idle in transaction" — holding a pooled connection and blocking autovacuum
+        on the tables it read. Committing first releases the connection; the
+        session starts a fresh transaction on its next query. Safe to use because
+        sessions are created with expire_on_commit=False, but call sites must
+        ensure any pending writes are intended to be committed (or not yet added
+        to the session)."""
+        if self.db_session.in_transaction():
+            await self.db_session.commit()
+
     async def _get_runtime(self, sandbox_id: str) -> dict[str, Any]:
         response = await self._send_runtime_api_request(
             'GET',
@@ -339,6 +354,7 @@ class RemoteSandboxService(SandboxService):
 
         # Batch fetch runtime data for all sandboxes
         sandbox_ids = [stored_sandbox.id for stored_sandbox in stored_sandboxes]
+        await self._release_db_transaction()
         runtimes_by_id = await self._get_runtimes_batch(sandbox_ids)
 
         # Convert stored sandboxes to domain models with runtime data
@@ -356,6 +372,7 @@ class RemoteSandboxService(SandboxService):
             return None
 
         runtime = None
+        await self._release_db_transaction()
         try:
             runtime = await self._get_runtime(stored_sandbox.id)
         except Exception:
@@ -381,6 +398,7 @@ class RemoteSandboxService(SandboxService):
         if stored_sandbox is None:
             return None
 
+        await self._release_db_transaction()
         try:
             runtime = await self._get_runtime(stored_sandbox.id)
             return self._to_sandbox_info(stored_sandbox, runtime)
@@ -458,6 +476,11 @@ class RemoteSandboxService(SandboxService):
             # get user id
             user_id = await self.user_context.get_user_id()
 
+            # Commit the reads above before the /start call below so no
+            # transaction spans the network I/O. The insert stays pending until
+            # the request commits, keeping it atomic with the rest of the request.
+            await self._release_db_transaction()
+
             # Store the sandbox
             stored_sandbox = StoredRemoteSandbox(
                 id=sandbox_id,
@@ -527,6 +550,7 @@ class RemoteSandboxService(SandboxService):
             stored_sandbox = await self._get_stored_sandbox(sandbox_id)
             if not stored_sandbox:
                 return False
+            await self._release_db_transaction()
             runtime_data = await self._get_runtime(sandbox_id)
             response = await self._send_runtime_api_request(
                 'POST',
@@ -569,6 +593,11 @@ class RemoteSandboxService(SandboxService):
             # leaked keys from being used while the sandbox is paused.
             stored_sandbox.session_api_key_hash = None
 
+            # Committing here persists the hash invalidation immediately
+            # (fail-safe) and keeps the transaction from spanning the
+            # runtime API calls below.
+            await self._release_db_transaction()
+
             runtime_data = await self._get_runtime(sandbox_id)
             response = await self._send_runtime_api_request(
                 'POST',
@@ -603,20 +632,22 @@ class RemoteSandboxService(SandboxService):
 
         Security: the session_api_key_hash is invalidated UP FRONT (like
         ``pause_sandbox`` clears it before pausing) so a delete — commonly a
-        revoke of a leaked key — kills it promptly. This goes further than pause:
-        on a transient stop failure the invalidation is committed before raising,
-        so the caller's rollback cannot resurrect the just-revoked key (pause does
-        not commit, so its clear can still be rolled back). The row is kept for
-        retry.
+        revoke of a leaked key — kills it promptly. The invalidation is committed
+        (via ``_release_db_transaction``) before the runtime API calls, so no
+        transaction spans the network I/O and the caller's rollback on a transient
+        failure cannot resurrect the just-revoked key. The row is kept for retry.
         """
-        had_key = False
         try:
             stored_sandbox = await self._get_stored_sandbox(sandbox_id)
             if not stored_sandbox:
                 return False
             # Security: drop the key now, before the (fallible) runtime stop.
-            had_key = stored_sandbox.session_api_key_hash is not None
             stored_sandbox.session_api_key_hash = None
+            # Commit the key invalidation and release the transaction before the
+            # network calls below so none spans runtime API I/O. Committing up
+            # front also persists the revoke immediately (fail-safe): a later
+            # rollback cannot bring the key back.
+            await self._release_db_transaction()
             try:
                 runtime_data = await self._get_runtime(sandbox_id)
             except httpx.HTTPStatusError as e:
@@ -641,12 +672,9 @@ class RemoteSandboxService(SandboxService):
             return True
         except httpx.HTTPError as e:
             # Transient runtime lookup/stop failure: keep the row + runtime and
-            # signal retryable (503) — never a 404. Persist the key invalidation
-            # now: the caller rolls back on this raise, which would otherwise
-            # restore the hash and leave a just-revoked key valid.
+            # signal retryable (503) — never a 404. The key invalidation was
+            # already committed before the network call above.
             _logger.error(f'Error deleting sandbox {sandbox_id}: {e}')
-            if had_key:
-                await self.db_session.commit()
             raise SandboxDeleteRetryError(
                 f'Could not complete delete for sandbox {sandbox_id}: {e}'
             ) from e
@@ -794,6 +822,9 @@ class RemoteSandboxService(SandboxService):
         if max_num_sandboxes <= 0:
             raise ValueError('max_num_sandboxes must be greater than 0')
 
+        # A transaction may be open from reads earlier in the request; release
+        # it before the /list call made by _get_user_running_sandboxes().
+        await self._release_db_transaction()
         running = await self._get_user_running_sandboxes()
 
         if len(running) <= max_num_sandboxes:
@@ -827,6 +858,10 @@ class RemoteSandboxService(SandboxService):
             stored_remote_sandbox[0].id: stored_remote_sandbox[0]
             for stored_remote_sandbox in stored_remote_sandboxes
         }
+
+        # Release the request transaction before the runtime API call below so
+        # no transaction spans network I/O.
+        await self._release_db_transaction()
 
         # Gracefully handle runtime API failures by falling back to empty runtimes.
         # This mirrors the behavior of get_sandbox which falls back to runtime=None.

@@ -473,9 +473,11 @@ class TestSandboxLifecycle:
         remote_sandbox_service.httpx_client.request.return_value = mock_response
         remote_sandbox_service.pause_old_sandboxes = AsyncMock(return_value=[])
 
-        # Mock database operations
+        # Mock database operations. With no transaction open, the service must
+        # never commit on its own — persistence belongs to the request scope.
         remote_sandbox_service.db_session.add = MagicMock()
         remote_sandbox_service.db_session.commit = AsyncMock()
+        remote_sandbox_service.db_session.in_transaction = MagicMock(return_value=False)
 
         # Execute
         with patch('base62.encodebytes', return_value='test-sandbox-123'):
@@ -698,6 +700,9 @@ class TestSandboxLifecycle:
         remote_sandbox_service._get_runtime = AsyncMock(return_value=runtime_data)
         remote_sandbox_service.db_session.delete = AsyncMock()
         remote_sandbox_service.db_session.commit = AsyncMock()
+        # With no transaction open, the service must never commit on its own —
+        # persistence belongs to the request scope.
+        remote_sandbox_service.db_session.in_transaction = MagicMock(return_value=False)
 
         mock_response = MagicMock()
         mock_response.status_code = 200
@@ -1815,6 +1820,179 @@ class TestPollAgentServersSessionScoping:
             'expected refresh_conversation to open a write session'
         )
         assert tracker.open == 0
+
+
+class TestTransactionReleasedBeforeNetworkIO:
+    """Regression tests: no DB transaction may span runtime API network I/O.
+
+    Holding the request-scoped transaction open across runtime API calls left
+    sessions 'idle in transaction' for minutes, pinning pooled connections and
+    blocking autovacuum on v1_remote_sandbox.
+    """
+
+    def _instrument(self, service, execute_results):
+        """Model lazy transaction state on the mocked session and record the
+        transaction state at every runtime API call.
+
+        ``execute`` opens a transaction (as SQLAlchemy does lazily), ``commit``
+        closes it. The patched ``httpx_client.request`` records whether a
+        transaction was open at the moment the network call fired.
+        """
+        state = {'in_txn': False, 'network_calls': []}
+        results = list(execute_results)
+
+        async def execute(*args, **kwargs):
+            state['in_txn'] = True
+            result = results.pop(0)
+            # Wrap list results to support both iteration (for batch_get_sandboxes)
+            # and scalars().all() (for _get_user_running_sandboxes)
+            if isinstance(result, list):
+                mock_result = MagicMock()
+                mock_scalars = MagicMock()
+                mock_scalars.all.return_value = result
+                mock_result.scalars.return_value = mock_scalars
+                # Make the mock result iterable (for batch_get_sandboxes tuple access)
+                mock_result.__iter__ = MagicMock(return_value=iter(result))
+                return mock_result
+            return result
+
+        async def commit():
+            state['in_txn'] = False
+
+        service.db_session.execute = AsyncMock(side_effect=execute)
+        service.db_session.commit = AsyncMock(side_effect=commit)
+        service.db_session.in_transaction = MagicMock(
+            side_effect=lambda: state['in_txn']
+        )
+        service.db_session.add = MagicMock()
+        service.db_session.delete = AsyncMock()
+
+        async def request(method, url, **kwargs):
+            state['network_calls'].append((url, state['in_txn']))
+            response = MagicMock()
+            response.status_code = 200
+            response.raise_for_status = MagicMock()
+            if url.endswith('/list'):
+                response.json.return_value = {'runtimes': []}
+            elif '/sessions/batch' in url:
+                response.json.return_value = []
+            else:
+                response.json.return_value = create_runtime_data()
+            return response
+
+        service.httpx_client.request = AsyncMock(side_effect=request)
+        return state
+
+    def _assert_no_txn_during_network(self, state):
+        assert state['network_calls'], 'expected at least one runtime API call'
+        held = [url for url, in_txn in state['network_calls'] if in_txn]
+        assert not held, f'transaction held open during network I/O: {held}'
+
+    @pytest.mark.asyncio
+    async def test_get_sandbox_by_session_api_key(self, remote_sandbox_service):
+        stored_sandbox = create_stored_sandbox()
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = stored_sandbox
+        state = self._instrument(remote_sandbox_service, [mock_result])
+
+        result = await remote_sandbox_service.get_sandbox_by_session_api_key('key')
+
+        assert result is not None
+        self._assert_no_txn_during_network(state)
+
+    @pytest.mark.asyncio
+    async def test_get_sandbox(self, remote_sandbox_service):
+        stored_sandbox = create_stored_sandbox()
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = stored_sandbox
+        state = self._instrument(remote_sandbox_service, [mock_result])
+
+        result = await remote_sandbox_service.get_sandbox('test-sandbox-123')
+
+        assert result is not None
+        self._assert_no_txn_during_network(state)
+
+    @pytest.mark.asyncio
+    async def test_search_sandboxes(self, remote_sandbox_service):
+        stored_sandbox = create_stored_sandbox()
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = [stored_sandbox]
+        state = self._instrument(remote_sandbox_service, [mock_result])
+
+        page = await remote_sandbox_service.search_sandboxes()
+
+        assert len(page.items) == 1
+        self._assert_no_txn_during_network(state)
+
+    @pytest.mark.asyncio
+    async def test_batch_get_sandboxes(self, remote_sandbox_service):
+        stored_sandbox = create_stored_sandbox()
+        state = self._instrument(remote_sandbox_service, [[(stored_sandbox,)]])
+
+        results = await remote_sandbox_service.batch_get_sandboxes(['test-sandbox-123'])
+
+        assert len(results) == 1
+        self._assert_no_txn_during_network(state)
+
+    @pytest.mark.asyncio
+    async def test_pause_sandbox(self, remote_sandbox_service):
+        stored_sandbox = create_stored_sandbox()
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = stored_sandbox
+        state = self._instrument(remote_sandbox_service, [mock_result])
+
+        assert await remote_sandbox_service.pause_sandbox('test-sandbox-123')
+
+        # The hash invalidation must be committed before the runtime API calls.
+        assert stored_sandbox.session_api_key_hash is None
+        self._assert_no_txn_during_network(state)
+
+    @pytest.mark.asyncio
+    async def test_resume_sandbox(self, remote_sandbox_service):
+        stored_sandbox = create_stored_sandbox()
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = stored_sandbox
+        # pause_old_sandboxes runs first: /list then a query returning no rows.
+        state = self._instrument(remote_sandbox_service, [[], mock_result])
+
+        assert await remote_sandbox_service.resume_sandbox('test-sandbox-123')
+
+        self._assert_no_txn_during_network(state)
+
+    @pytest.mark.asyncio
+    async def test_delete_sandbox(self, remote_sandbox_service):
+        stored_sandbox = create_stored_sandbox()
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = stored_sandbox
+        state = self._instrument(remote_sandbox_service, [mock_result])
+
+        assert await remote_sandbox_service.delete_sandbox('test-sandbox-123')
+
+        remote_sandbox_service.db_session.delete.assert_awaited_once_with(
+            stored_sandbox
+        )
+        self._assert_no_txn_during_network(state)
+
+    @pytest.mark.asyncio
+    async def test_start_sandbox_insert_stays_pending(self, remote_sandbox_service):
+        # start_sandbox runs pause_old_sandboxes first, which calls
+        # _get_user_running_sandboxes: a /list call followed by a DB query. The
+        # query returns no running sandboxes for the user, so nothing is paused.
+        state = self._instrument(
+            remote_sandbox_service,
+            [
+                [],  # query result (no running sandboxes for user)
+            ],
+        )
+
+        result = await remote_sandbox_service.start_sandbox()
+
+        assert result is not None
+        self._assert_no_txn_during_network(state)
+        # The insert must be pending (not committed) when /start fires, so a
+        # failed start still rolls it back with the rest of the request.
+        remote_sandbox_service.db_session.add.assert_called_once()
+        assert not state['in_txn']
 
 
 class TestBatchGetSandboxes:
