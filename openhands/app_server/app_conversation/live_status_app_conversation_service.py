@@ -112,6 +112,7 @@ from openhands.app_server.utils.docker_utils import (
 )
 from openhands.app_server.utils.git import ensure_valid_git_branch_name
 from openhands.app_server.utils.import_utils import get_impl
+from openhands.app_server.utils.llm import resolve_llm_model
 from openhands.app_server.utils.llm_metadata import (
     get_llm_metadata,
     should_set_litellm_extra_body,
@@ -1271,6 +1272,9 @@ class LiveStatusAppConversationService(AppConversationServiceBase):
             or user.agent_settings.llm.model
             or LLM.model_fields['model'].default
         )
+        resolved_model = resolve_llm_model(model, user.agent_settings.llm.base_url)
+        if resolved_model is not None:
+            model = resolved_model
 
         base_url = resolve_provider_llm_base_url(
             model,
