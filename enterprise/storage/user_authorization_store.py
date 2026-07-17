@@ -1,5 +1,9 @@
 """Store class for managing user authorizations."""
 
+import os
+import re
+import time
+from functools import lru_cache
 from typing import Optional
 
 from sqlalchemy import func, or_, select
@@ -7,9 +11,91 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from storage.database import a_session_maker
 from storage.user_authorization import UserAuthorization, UserAuthorizationType
 
+# The user_authorizations table is tiny (a few dozen rows) but is read on every
+# authentication/authorization request. Querying it per request dominates the
+# load on the table even though each scan is cheap. Instead, cache the full rule
+# set in process memory behind a short TTL and evaluate the email/provider match
+# in Python. The cache is invalidated on writes so changes take effect promptly.
+_CACHE_TTL_SECONDS = float(os.getenv('USER_AUTHORIZATION_CACHE_TTL_SECONDS', '30'))
+
+_cached_authorizations: list[UserAuthorization] | None = None
+_cache_expires_at: float = 0.0
+
+
+@lru_cache(maxsize=1024)
+def _compile_like_pattern(pattern: str) -> re.Pattern[str]:
+    """Translate a SQL LIKE pattern into a compiled, case-insensitive regex.
+
+    Mirrors the semantics of ``LOWER(email) LIKE LOWER(email_pattern)`` used by
+    the SQL query: ``%`` matches any sequence of characters, ``_`` matches a
+    single character, and every other character is matched literally.
+    """
+    regex_parts = ['^']
+    for char in pattern:
+        if char == '%':
+            regex_parts.append('.*')
+        elif char == '_':
+            regex_parts.append('.')
+        else:
+            regex_parts.append(re.escape(char))
+    regex_parts.append('$')
+    return re.compile(''.join(regex_parts), re.IGNORECASE | re.DOTALL)
+
 
 class UserAuthorizationStore:
     """Store for managing user authorization rules."""
+
+    @staticmethod
+    def invalidate_cache() -> None:
+        """Clear the in-memory authorization cache.
+
+        Called after any write so subsequent reads reflect the new rule set.
+        """
+        global _cached_authorizations, _cache_expires_at
+        _cached_authorizations = None
+        _cache_expires_at = 0.0
+
+    @staticmethod
+    async def _get_cached_authorizations() -> list[UserAuthorization]:
+        """Return all authorization rules, loading them from the DB on cache miss.
+
+        The returned list is shared and must not be mutated by callers.
+        """
+        global _cached_authorizations, _cache_expires_at
+        now = time.monotonic()
+        if _cached_authorizations is not None and now < _cache_expires_at:
+            return _cached_authorizations
+
+        async with a_session_maker() as session:
+            result = await session.execute(select(UserAuthorization))
+            authorizations = list(result.scalars().all())
+            # Detach so the rows remain usable after the session closes.
+            session.expunge_all()
+
+        _cached_authorizations = authorizations
+        _cache_expires_at = time.monotonic() + _CACHE_TTL_SECONDS
+        return authorizations
+
+    @staticmethod
+    def _matches_rule(
+        authorization: UserAuthorization,
+        email: str,
+        provider_type: str | None,
+    ) -> bool:
+        """Replicate the SQL matching logic for a single rule in Python.
+
+        - provider_type IS NULL matches any provider, otherwise it must be equal
+        - email_pattern IS NULL matches any email, otherwise SQL LIKE applies
+        """
+        if (
+            authorization.provider_type is not None
+            and authorization.provider_type != provider_type
+        ):
+            return False
+        if authorization.email_pattern is None:
+            return True
+        pattern = _compile_like_pattern(authorization.email_pattern)
+        return pattern.match(email) is not None
 
     @staticmethod
     async def _get_matching_authorizations(
@@ -65,13 +151,17 @@ class UserAuthorizationStore:
             List of matching UserAuthorization objects
         """
         if session is not None:
+            # A caller-supplied session may include uncommitted writes, so query
+            # the database directly to honour the transaction's view of the data.
             return await UserAuthorizationStore._get_matching_authorizations(
                 email, provider_type, session
             )
-        async with a_session_maker() as new_session:
-            return await UserAuthorizationStore._get_matching_authorizations(
-                email, provider_type, new_session
-            )
+        authorizations = await UserAuthorizationStore._get_cached_authorizations()
+        return [
+            authorization
+            for authorization in authorizations
+            if UserAuthorizationStore._matches_rule(authorization, email, provider_type)
+        ]
 
     @staticmethod
     async def get_authorization_type(
@@ -151,15 +241,17 @@ class UserAuthorizationStore:
             The created UserAuthorization object
         """
         if session is not None:
-            return await UserAuthorizationStore._create_authorization(
+            auth = await UserAuthorizationStore._create_authorization(
                 email_pattern, provider_type, auth_type, session
             )
-        async with a_session_maker() as new_session:
-            auth = await UserAuthorizationStore._create_authorization(
-                email_pattern, provider_type, auth_type, new_session
-            )
-            await new_session.commit()
-            return auth
+        else:
+            async with a_session_maker() as new_session:
+                auth = await UserAuthorizationStore._create_authorization(
+                    email_pattern, provider_type, auth_type, new_session
+                )
+                await new_session.commit()
+        UserAuthorizationStore.invalidate_cache()
+        return auth
 
     @staticmethod
     async def _delete_authorization(
@@ -191,13 +283,16 @@ class UserAuthorizationStore:
             True if deleted, False if not found
         """
         if session is not None:
-            return await UserAuthorizationStore._delete_authorization(
+            deleted = await UserAuthorizationStore._delete_authorization(
                 authorization_id, session
             )
-        async with a_session_maker() as new_session:
-            deleted = await UserAuthorizationStore._delete_authorization(
-                authorization_id, new_session
-            )
-            if deleted:
-                await new_session.commit()
-            return deleted
+        else:
+            async with a_session_maker() as new_session:
+                deleted = await UserAuthorizationStore._delete_authorization(
+                    authorization_id, new_session
+                )
+                if deleted:
+                    await new_session.commit()
+        if deleted:
+            UserAuthorizationStore.invalidate_cache()
+        return deleted

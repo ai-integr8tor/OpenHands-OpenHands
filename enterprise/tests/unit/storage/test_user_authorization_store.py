@@ -34,6 +34,30 @@ async def async_session_maker(async_engine):
     return session_maker
 
 
+@pytest.fixture(autouse=True)
+def reset_authorization_cache():
+    """Reset the module-level authorization cache around each test.
+
+    The cache is process-global, so it must be cleared between tests to avoid
+    one test's rules leaking into another.
+    """
+    UserAuthorizationStore.invalidate_cache()
+    yield
+    UserAuthorizationStore.invalidate_cache()
+
+
+class CountingSessionMaker:
+    """Wraps a session maker and counts how many sessions it opens."""
+
+    def __init__(self, session_maker):
+        self._session_maker = session_maker
+        self.call_count = 0
+
+    def __call__(self, *args, **kwargs):
+        self.call_count += 1
+        return self._session_maker(*args, **kwargs)
+
+
 class TestGetMatchingAuthorizations:
     """Tests for get_matching_authorizations method."""
 
@@ -633,3 +657,116 @@ class TestPatternMatchingEdgeCases:
                 provider_type='github',
             )
             assert len(result) == 0
+
+
+class TestAuthorizationCaching:
+    """Tests for the in-memory TTL cache on the read (no-session) path."""
+
+    @pytest.mark.asyncio
+    async def test_repeated_lookup_within_ttl_issues_no_query(
+        self, async_session_maker
+    ):
+        """A second lookup within the TTL window must not touch the database."""
+        counter = CountingSessionMaker(async_session_maker)
+        with patch('storage.user_authorization_store.a_session_maker', counter):
+            await UserAuthorizationStore.create_authorization(
+                email_pattern='%@example.com',
+                provider_type=None,
+                auth_type=UserAuthorizationType.WHITELIST,
+            )
+
+            # First read loads the rule set from the database.
+            result = await UserAuthorizationStore.get_authorization_type(
+                email='user@example.com',
+                provider_type='github',
+            )
+            assert result == UserAuthorizationType.WHITELIST
+            calls_after_first = counter.call_count
+
+            # Subsequent reads within the TTL are served from the cache.
+            for _ in range(5):
+                result = await UserAuthorizationStore.get_authorization_type(
+                    email='user@example.com',
+                    provider_type='github',
+                )
+                assert result == UserAuthorizationType.WHITELIST
+
+            assert counter.call_count == calls_after_first
+
+    @pytest.mark.asyncio
+    async def test_create_invalidates_cache(self, async_session_maker):
+        """Creating a rule must invalidate the cache so the next read sees it."""
+        with patch(
+            'storage.user_authorization_store.a_session_maker', async_session_maker
+        ):
+            # Prime the cache with the empty rule set.
+            result = await UserAuthorizationStore.get_authorization_type(
+                email='user@example.com',
+                provider_type='github',
+            )
+            assert result is None
+
+            await UserAuthorizationStore.create_authorization(
+                email_pattern='%@example.com',
+                provider_type=None,
+                auth_type=UserAuthorizationType.BLACKLIST,
+            )
+
+            result = await UserAuthorizationStore.get_authorization_type(
+                email='user@example.com',
+                provider_type='github',
+            )
+            assert result == UserAuthorizationType.BLACKLIST
+
+    @pytest.mark.asyncio
+    async def test_delete_invalidates_cache(self, async_session_maker):
+        """Deleting a rule must invalidate the cache so the next read drops it."""
+        with patch(
+            'storage.user_authorization_store.a_session_maker', async_session_maker
+        ):
+            auth = await UserAuthorizationStore.create_authorization(
+                email_pattern='%@example.com',
+                provider_type=None,
+                auth_type=UserAuthorizationType.BLACKLIST,
+            )
+
+            # Prime the cache with the rule present.
+            result = await UserAuthorizationStore.get_authorization_type(
+                email='user@example.com',
+                provider_type='github',
+            )
+            assert result == UserAuthorizationType.BLACKLIST
+
+            await UserAuthorizationStore.delete_authorization(auth.id)
+
+            result = await UserAuthorizationStore.get_authorization_type(
+                email='user@example.com',
+                provider_type='github',
+            )
+            assert result is None
+
+    @pytest.mark.asyncio
+    async def test_expired_cache_reloads_from_database(self, async_session_maker):
+        """Once the TTL elapses, the next read reloads from the database."""
+        counter = CountingSessionMaker(async_session_maker)
+        with patch('storage.user_authorization_store.a_session_maker', counter):
+            await UserAuthorizationStore.create_authorization(
+                email_pattern='%@example.com',
+                provider_type=None,
+                auth_type=UserAuthorizationType.WHITELIST,
+            )
+
+            await UserAuthorizationStore.get_authorization_type(
+                email='user@example.com',
+                provider_type='github',
+            )
+            calls_after_first = counter.call_count
+
+            # Force the cached entry to look expired.
+            with patch('storage.user_authorization_store._cache_expires_at', 0.0):
+                await UserAuthorizationStore.get_authorization_type(
+                    email='user@example.com',
+                    provider_type='github',
+                )
+
+            assert counter.call_count == calls_after_first + 1
