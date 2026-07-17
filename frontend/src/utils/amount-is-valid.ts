@@ -1,13 +1,34 @@
-const MINIMUM_AMOUNT = 10;
-const MAXIMUM_AMOUNT = 25_000;
+export const MINIMUM_AMOUNT = 10;
+export const MAXIMUM_AMOUNT = 25_000;
 
-export const amountIsValid = (amount: string) => {
-  const value = parseInt(amount, 10);
-  if (Number.isNaN(value)) return false;
-  if (value < 0) return false;
-  if (value < MINIMUM_AMOUNT) return false;
-  if (value > MAXIMUM_AMOUNT) return false;
-  if (value !== parseFloat(amount)) return false; // Ensure it's an integer
+export type AmountValidationError =
+  | "empty"
+  | "invalid"
+  | "negative"
+  | "not_integer"
+  | "below_minimum"
+  | "above_maximum";
 
-  return true;
+const DECIMAL_AMOUNT_PATTERN = /^-?\d+(?:\.\d+)?$/;
+
+export const getAmountValidationError = (
+  amount: string,
+): AmountValidationError | null => {
+  const trimmedAmount = amount.trim();
+  if (!trimmedAmount) return "empty";
+
+  if (!DECIMAL_AMOUNT_PATTERN.test(trimmedAmount)) return "invalid";
+
+  const value = Number(trimmedAmount);
+  if (!Number.isFinite(value)) return "invalid";
+  if (value < 0) return "negative";
+  if (trimmedAmount.includes(".")) return "not_integer";
+  if (!Number.isInteger(value)) return "not_integer";
+  if (value < MINIMUM_AMOUNT) return "below_minimum";
+  if (value > MAXIMUM_AMOUNT) return "above_maximum";
+
+  return null;
 };
+
+export const amountIsValid = (amount: string) =>
+  getAmountValidationError(amount) === null;
