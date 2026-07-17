@@ -16,6 +16,7 @@ import { updateConversationLlmModelInCache } from "#/hooks/mutation/conversation
 import { useErrorMessageStore } from "#/stores/error-message-store";
 import { useOptimisticUserMessageStore } from "#/stores/optimistic-user-message-store";
 import { useV1ConversationStateStore } from "#/stores/v1-conversation-state-store";
+import { V1ExecutionStatus } from "#/types/v1/core/base/common";
 import { useCommandStore } from "#/stores/command-store";
 import { useBrowserStore } from "#/stores/browser-store";
 import {
@@ -77,6 +78,16 @@ const ConversationWebSocketContext = createContext<
   ConversationWebSocketContextType | undefined
 >(undefined);
 
+// Wait this long after the main socket drops before showing the connection
+// banner. Transient drops reconnect (with full event replay) within a few
+// seconds, so this lets normal churn self-heal silently.
+export const CONNECTION_ERROR_GRACE_MS = 5000;
+
+// The connection banner is owned by the main socket: only its onError sets it
+// and only its onOpen clears it. Other producers (planning socket, non-error
+// events) must not erase it while the main connection is still down.
+export const CONNECTION_ERROR_MESSAGE = "Failed to connect to server";
+
 export function ConversationWebSocketProvider({
   children,
   conversationId,
@@ -101,7 +112,11 @@ export function ConversationWebSocketProvider({
   // Track if we've ever successfully connected for each connection
   // Don't show errors until after first successful connection
   const hasConnectedRefMain = React.useRef(false);
-  const hasConnectedRefPlanning = React.useRef(false);
+
+  // Pending grace-window timer before the connection banner is shown.
+  const connectionErrorTimerRef = React.useRef<ReturnType<
+    typeof setTimeout
+  > | null>(null);
 
   const queryClient = useQueryClient();
   const { addEvent } = useEventStore();
@@ -151,6 +166,12 @@ export function ConversationWebSocketProvider({
       // Budget errors persist until agent proves LLM is working
       if (isBudgetError && !isAgentEvent) {
         return; // Keep budget error visible
+      }
+
+      // The connection banner is cleared only by the main socket reconnect, so
+      // a (possibly planning-socket) event must not erase it while down.
+      if (currentError === CONNECTION_ERROR_MESSAGE) {
+        return;
       }
 
       removeErrorMessage();
@@ -327,14 +348,18 @@ export function ConversationWebSocketProvider({
     [isLoadingHistoryMain, isLoadingHistoryPlanning],
   );
 
-  // Reset hasConnected flags and history loading state when conversation changes
+  // Reset history loading state when conversation changes
   useEffect(() => {
-    hasConnectedRefPlanning.current = false;
     setIsLoadingHistoryMain(true);
     setExpectedEventCountMain(null);
     receivedEventCountRefMain.current = 0;
     // Reset the tracked event ref when conversation changes
     latestPlanningFileEventRef.current = null;
+    // Drop any pending connection banner from the previous conversation.
+    if (connectionErrorTimerRef.current) {
+      clearTimeout(connectionErrorTimerRef.current);
+      connectionErrorTimerRef.current = null;
+    }
   }, [conversationId]);
 
   const { data: preloadedEvents, isFetched: isHistoryFetched } =
@@ -749,6 +774,11 @@ export function ConversationWebSocketProvider({
       onOpen: async () => {
         setMainConnectionState("OPEN");
         hasConnectedRefMain.current = true; // Mark that we've successfully connected
+        // A reconnect cancels any pending connection banner before it shows.
+        if (connectionErrorTimerRef.current) {
+          clearTimeout(connectionErrorTimerRef.current);
+          connectionErrorTimerRef.current = null;
+        }
         removeErrorMessage(); // Clear any previous error messages on successful connection
 
         // Fetch expected event count for history loading detection
@@ -778,9 +808,21 @@ export function ConversationWebSocketProvider({
       },
       onError: () => {
         setMainConnectionState("CLOSED");
-        // Only show error message if we've previously connected successfully
-        if (hasConnectedRefMain.current) {
-          setErrorMessage("Failed to connect to server");
+        // Don't flash on transient reconnect churn. Only surface a banner if
+        // we'd previously connected, the drop persists past the grace window,
+        // and the agent is actively running (idle drops self-heal silently
+        // and still show in the status indicator). onOpen cancels this first.
+        if (hasConnectedRefMain.current && !connectionErrorTimerRef.current) {
+          connectionErrorTimerRef.current = setTimeout(() => {
+            connectionErrorTimerRef.current = null;
+            const isRunning =
+              useV1ConversationStateStore.getState().execution_status ===
+              V1ExecutionStatus.RUNNING;
+            // Don't clobber a more specific error (e.g. budget/credit).
+            if (isRunning && !useErrorMessageStore.getState().errorMessage) {
+              setErrorMessage(CONNECTION_ERROR_MESSAGE);
+            }
+          }, CONNECTION_ERROR_GRACE_MS);
         }
       },
       onMessage: handleMainMessage,
@@ -812,8 +854,13 @@ export function ConversationWebSocketProvider({
       reconnect: { enabled: true },
       onOpen: async () => {
         setPlanningConnectionState("OPEN");
-        hasConnectedRefPlanning.current = true; // Mark that we've successfully connected
-        removeErrorMessage(); // Clear any previous error messages on successful connection
+        // Clear prior errors, but never the main socket's connection banner.
+        if (
+          useErrorMessageStore.getState().errorMessage !==
+          CONNECTION_ERROR_MESSAGE
+        ) {
+          removeErrorMessage();
+        }
 
         // Fetch expected event count for history loading detection
         if (
@@ -845,16 +892,13 @@ export function ConversationWebSocketProvider({
       },
       onError: () => {
         setPlanningConnectionState("CLOSED");
-        // Only show error message if we've previously connected successfully
-        if (hasConnectedRefPlanning.current) {
-          setErrorMessage("Failed to connect to server");
-        }
+        // Connection banner tracks the main socket only; planning churn is
+        // secondary and shouldn't raise a "failed to connect" error on its own.
       },
       onMessage: handlePlanningMessage,
     };
   }, [
     handlePlanningMessage,
-    setErrorMessage,
     removeErrorMessage,
     sessionApiKey,
     subConversations,
@@ -979,6 +1023,17 @@ export function ConversationWebSocketProvider({
       updateState();
     }
   }, [planningAgentSocket, planningAgentWsUrl]);
+
+  // Clear any pending connection-error timer on unmount.
+  useEffect(
+    () => () => {
+      if (connectionErrorTimerRef.current) {
+        clearTimeout(connectionErrorTimerRef.current);
+        connectionErrorTimerRef.current = null;
+      }
+    },
+    [],
+  );
 
   const contextValue = useMemo(
     () => ({ connectionState, sendMessage, isLoadingHistory }),
