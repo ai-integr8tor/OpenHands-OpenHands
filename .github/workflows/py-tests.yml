@@ -57,7 +57,13 @@ jobs:
       - name: Build Environment
         run: make build
       - name: Run Unit Tests
-        run: PYTHONPATH=".:$PYTHONPATH" poetry run pytest --forked -n auto -s ./tests/unit --cov=openhands --cov-branch
+        # NOTE: do not add `--forked` here. pytest-forked runs each test in an
+        # os.fork() child that exits via os._exit(), so coverage collected in
+        # the child is never written back. That silently undercounts coverage
+        # (multiprocessing concurrency does not recover it). `-n auto` already
+        # provides process-level parallelism/isolation across xdist workers,
+        # and pytest-cov correctly combines per-worker coverage.
+        run: PYTHONPATH=".:$PYTHONPATH" poetry run pytest -n auto -s ./tests/unit --cov=openhands --cov-branch
         env:
           COVERAGE_FILE: ".coverage.${{ matrix.python_version }}"
       - name: Store coverage file
@@ -89,7 +95,12 @@ jobs:
         run: poetry install --with dev,test
       - name: Run Unit Tests
         # Use base working directory for coverage paths to line up.
-        run: PYTHONPATH=".:$PYTHONPATH" poetry run --project=enterprise pytest --forked -n auto -s -p no:ddtrace -p no:ddtrace.pytest_bdd -p no:ddtrace.pytest_benchmark ./enterprise/tests/unit --cov=enterprise --cov-branch
+        # NOTE: do not add `--forked` here. pytest-forked runs each test in an
+        # os.fork() child that exits via os._exit(), so coverage collected in
+        # the child is never written back, silently undercounting coverage.
+        # `-n auto` already provides process-level parallelism/isolation across
+        # xdist workers, and pytest-cov correctly combines per-worker coverage.
+        run: PYTHONPATH=".:$PYTHONPATH" poetry run --project=enterprise pytest -n auto -s -p no:ddtrace -p no:ddtrace.pytest_bdd -p no:ddtrace.pytest_benchmark ./enterprise/tests/unit --cov=enterprise --cov-branch
         env:
           COVERAGE_FILE: ".coverage.enterprise.${{ matrix.python_version }}"
       - name: Store coverage file
