@@ -2,7 +2,7 @@
 
 The execute_callbacks query filters on (conversation_id, status, event_kind)
 but none of these columns were indexed, causing full sequential scans on the
-event_callback table for every event dispatch (INC-95). This composite index
+event_callback table for every event dispatch. This composite index
 directly covers that query.
 
 Implementation note: this migration runs through the enterprise alembic harness
