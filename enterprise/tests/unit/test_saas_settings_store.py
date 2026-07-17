@@ -1643,3 +1643,221 @@ class TestGetEffectiveLlmApiKey:
         result = SaasSettingsStore._get_effective_llm_api_key(org, member)
 
         assert result is None
+
+
+# ---------------------------------------------------------------------------
+# verify_and_fix_managed_llm_key (APP-2678) — read-path self-heal for stale
+# managed OpenHands-proxy keys. Mirrors the store-side _ensure_api_key
+# guarantee but fires on the conversation-start load path, not just on
+# store(), so a key lost on the proxy side (admin action, DB restore,
+# botched rotation) doesn't 401 every conversation the user starts.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_verify_and_fix_managed_llm_key_noop_for_unmanaged_base_url():
+    """BYOR (non-managed base_url) is left alone.
+
+    The call must not touch the proxy and must not persist anything.
+    """
+    store = SaasSettingsStore('test-user-id-123')
+    settings = _make_settings(
+        model='gpt-4',
+        base_url='https://api.openai.com/v1',
+        api_key='sk-byor-key',
+    )
+    original_key = _secret_value(settings, 'llm.api_key')
+
+    with patch(
+        'storage.saas_settings_store.LiteLlmManager.verify_existing_key',
+        new_callable=AsyncMock,
+    ) as mock_verify:
+        await store.verify_and_fix_managed_llm_key(settings)
+
+    mock_verify.assert_not_called()
+    assert _secret_value(settings, 'llm.api_key') == original_key
+
+
+@pytest.mark.asyncio
+async def test_verify_and_fix_managed_llm_key_noop_when_key_still_valid():
+    """The key is already in the proxy.
+
+    Don't mint a new one, don't touch the org member row.
+    """
+    from uuid import UUID
+
+    user_uuid = UUID('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa')
+    org_uuid = UUID('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb')
+    store = SaasSettingsStore(str(user_uuid), effective_org_id=org_uuid)
+    existing_key = 'sk-still-valid-key'
+    settings = _make_settings(
+        model='openhands/gpt-4',
+        base_url=LITE_LLM_API_URL,
+        api_key=existing_key,
+    )
+
+    with (
+        patch(
+            'storage.saas_settings_store.LiteLlmManager.verify_existing_key',
+            new_callable=AsyncMock,
+            return_value=True,
+        ) as mock_verify,
+        patch(
+            'storage.saas_settings_store.OrgMemberStore.update_all_members_settings_async',
+            new_callable=AsyncMock,
+        ) as mock_update,
+    ):
+        await store.verify_and_fix_managed_llm_key(settings)
+
+    mock_verify.assert_awaited_once()
+    verify_args = mock_verify.await_args
+    assert verify_args is not None
+    assert verify_args.args[0] == existing_key
+    assert verify_args.args[1] == str(user_uuid)
+    assert verify_args.args[2] == str(org_uuid)
+    assert verify_args.kwargs.get('openhands_type') is True
+    mock_update.assert_not_called()
+    assert _secret_value(settings, 'llm.api_key') == existing_key
+
+
+@pytest.mark.asyncio
+async def test_verify_and_fix_managed_llm_key_regenerates_and_persists():
+    """The full APP-2678 fix.
+
+    Key missing from the proxy → mint a new one under the deterministic
+    alias, persist it to the org member row, and update the in-memory
+    LLM.api_key so the runtime sees the healed key on this request, not
+    just on the next load.
+    """
+    from contextlib import asynccontextmanager
+    from uuid import UUID
+
+    from storage.lite_llm_manager import get_openhands_cloud_key_alias
+
+    user_uuid = UUID('11111111-1111-1111-1111-111111111111')
+    org_uuid = UUID('22222222-2222-2222-2222-222222222222')
+    store = SaasSettingsStore(str(user_uuid), effective_org_id=org_uuid)
+    new_key = 'sk-freshly-minted-key'
+    settings = _make_settings(
+        model='openhands/gpt-4',
+        base_url=LITE_LLM_API_URL,
+        api_key='sk-stale-key-1234',
+    )
+    expected_alias = get_openhands_cloud_key_alias(str(user_uuid), str(org_uuid))
+
+    @asynccontextmanager
+    async def fake_session_maker():
+        yield AsyncMock()
+
+    with (
+        patch(
+            'storage.saas_settings_store.LiteLlmManager.verify_existing_key',
+            new_callable=AsyncMock,
+            return_value=False,
+        ) as mock_verify,
+        patch(
+            'storage.saas_settings_store.LiteLlmManager.delete_key_by_alias',
+            new_callable=AsyncMock,
+        ) as mock_delete,
+        patch(
+            'storage.saas_settings_store.LiteLlmManager.generate_key',
+            new_callable=AsyncMock,
+            return_value=new_key,
+        ) as mock_generate,
+        patch(
+            'storage.saas_settings_store.OrgMemberStore.update_all_members_settings_async',
+            new_callable=AsyncMock,
+        ) as mock_update,
+        patch(
+            'storage.saas_settings_store.a_session_maker',
+            fake_session_maker,
+        ),
+    ):
+        await store.verify_and_fix_managed_llm_key(settings)
+
+    # The verify call must have happened with the right args.
+    mock_verify.assert_awaited_once()
+    verify_args = mock_verify.await_args
+    assert verify_args is not None
+    # First positional: the key value, second: user_id, third: org_id
+    assert verify_args.args[0] == 'sk-stale-key-1234'
+    assert verify_args.args[1] == str(user_uuid)
+    assert verify_args.args[2] == str(org_uuid)
+    assert verify_args.kwargs.get('openhands_type') is True
+
+    # The deterministic alias was used for both delete and generate.
+    mock_delete.assert_awaited_once_with(key_alias=expected_alias)
+    mock_generate.assert_awaited_once_with(
+        str(user_uuid),
+        str(org_uuid),
+        expected_alias,
+        {'type': 'openhands'},
+    )
+
+    # The new key was persisted to the member row (via the OrgMember
+    # store, not the settings store) and the in-memory LLM got the
+    # fresh value.
+    mock_update.assert_awaited_once()
+    update_args = mock_update.await_args
+    member_update = update_args.args[2]
+    assert member_update.llm_api_key is not None
+    assert member_update.llm_api_key.get_secret_value() == new_key
+    assert _secret_value(settings, 'llm.api_key') == new_key
+
+
+@pytest.mark.asyncio
+async def test_verify_and_fix_managed_llm_key_handles_delete_failure():
+    """``delete_key_by_alias`` raising must not block the self-heal.
+
+    If the proxy 404s on the prior key, the heal must still mint a
+    fresh key — otherwise a one-time cleanup glitch would block the
+    fix and the user would keep 401'ing.
+    """
+    from contextlib import asynccontextmanager
+    from uuid import UUID
+
+    user_uuid = UUID('33333333-3333-3333-3333-333333333333')
+    org_uuid = UUID('44444444-4444-4444-4444-444444444444')
+    store = SaasSettingsStore(str(user_uuid), effective_org_id=org_uuid)
+    new_key = 'sk-recovered-key'
+    settings = _make_settings(
+        model='openhands/gpt-4',
+        base_url=LITE_LLM_API_URL,
+        api_key='sk-stale-key-9999',
+    )
+
+    @asynccontextmanager
+    async def fake_session_maker():
+        yield AsyncMock()
+
+    with (
+        patch(
+            'storage.saas_settings_store.LiteLlmManager.verify_existing_key',
+            new_callable=AsyncMock,
+            return_value=False,
+        ),
+        patch(
+            'storage.saas_settings_store.LiteLlmManager.delete_key_by_alias',
+            new_callable=AsyncMock,
+            side_effect=Exception('proxy 404'),
+        ) as mock_delete,
+        patch(
+            'storage.saas_settings_store.LiteLlmManager.generate_key',
+            new_callable=AsyncMock,
+            return_value=new_key,
+        ) as mock_generate,
+        patch(
+            'storage.saas_settings_store.OrgMemberStore.update_all_members_settings_async',
+            new_callable=AsyncMock,
+        ),
+        patch(
+            'storage.saas_settings_store.a_session_maker',
+            fake_session_maker,
+        ),
+    ):
+        await store.verify_and_fix_managed_llm_key(settings)
+
+    # Delete was attempted (and failed) but the heal still completed.
+    mock_delete.assert_awaited_once()
+    mock_generate.assert_awaited_once()
+    assert _secret_value(settings, 'llm.api_key') == new_key

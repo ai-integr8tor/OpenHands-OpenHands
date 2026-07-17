@@ -45,7 +45,6 @@ from openhands.app_server.integrations.provider import (
 )
 from openhands.app_server.secrets.secrets_models import Secrets
 from openhands.app_server.settings.settings_models import Settings
-from openhands.app_server.settings.settings_store import SettingsStore
 from openhands.app_server.user_auth.user_auth import AuthType, UserAuth
 
 token_manager = TokenManager()
@@ -459,6 +458,34 @@ class SaasUserAuth(UserAuth):
             self._settings = settings
         return settings
 
+    async def ensure_managed_llm_key(
+        self, settings: Settings | None
+    ) -> Settings | None:
+        """Self-heal the managed (OpenHands proxy) LLM API key on the read
+        path used to *start* a conversation (APP-2678).
+
+        The store-side ``_ensure_api_key`` only runs on ``store()`` and
+        never on the conversation-start load path, so a key that has been
+        lost on the proxy side (admin action, DB restore, botched
+        rotation) keeps getting shipped to the runtime until the user
+        happens to save their settings again. Without this, every
+        conversation start for the affected user 401s with "Invalid proxy
+        server token passed" — see APP-2678.
+        """
+        # Delegates to :meth:`SaasSettingsStore.verify_and_fix_managed_llm_key`,
+        # which actually does the LiteLLM ``/user/info`` round-trip and the
+        # regenerate-and-persist dance.
+        #
+        # No-op when ``settings`` is ``None`` (user not found) or the LLM
+        # is not on the OpenHands proxy.
+        if settings is None:
+            return settings
+        settings_store = await self.get_user_settings_store()
+        healed = await settings_store.verify_and_fix_managed_llm_key(settings)
+        if healed is not settings:
+            return healed
+        return settings
+
     async def get_secrets_store(self) -> SaasSecretsStore:
         logger.debug('saas_user_auth_get_secrets_store')
         secrets_store = self.secrets_store
@@ -586,7 +613,7 @@ class SaasUserAuth(UserAuth):
             # Any error refreshing tokens means we need to log in again
             raise AuthError() from e
 
-    async def get_user_settings_store(self) -> SettingsStore:
+    async def get_user_settings_store(self) -> SaasSettingsStore:
         settings_store = self.settings_store
         if settings_store:
             return settings_store
