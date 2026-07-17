@@ -118,6 +118,15 @@ class AuthUserContext(UserContext):
                     token_value = provider_token.token.get_secret_value()
                     if token_value:
                         results[env_key] = token_value
+                # Expose the configured host (e.g. bitbucket_data_center_host) so
+                # the agent can build REST API and git remote URLs for self-hosted
+                # providers even before — or without — cloning a repository. Azure
+                # DevOps is excluded because its host field may hold an
+                # org/project path rather than a bare host (see
+                # ProviderHandler.get_authenticated_git_url).
+                if provider_token.host and provider_type != ProviderType.AZURE_DEVOPS:
+                    host_key = ProviderHandler.get_provider_host_env_key(provider_type)
+                    results[host_key] = provider_token.host
         return results
 
     async def get_provider_handler(self):

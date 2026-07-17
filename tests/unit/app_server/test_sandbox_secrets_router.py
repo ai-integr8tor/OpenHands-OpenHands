@@ -820,6 +820,60 @@ class TestProviderTokensInEndpoints:
         assert result[gl_key] == 'glpat-test456'
         ctx.get_latest_token.assert_not_called()  # type: ignore[attr-defined]
 
+    async def test_get_provider_tokens_as_env_vars_includes_host(self):
+        """A self-hosted provider host is exposed alongside its token.
+
+        This must work independently of any repository so the agent can build
+        REST API / git remote URLs before — or without — cloning a repo.
+        """
+        mock_user_auth = AsyncMock()
+        mock_user_auth.get_provider_tokens = AsyncMock(
+            return_value={
+                ProviderType.BITBUCKET_DATA_CENTER: ProviderToken(
+                    token=SecretStr('user:dc_token'),
+                    host='bitbucket.internal.example.com',
+                ),
+                # Cloud provider with no host must NOT add a host key.
+                ProviderType.GITHUB: ProviderToken(token=SecretStr('ghp_test123')),
+            }
+        )
+
+        ctx = AuthUserContext(user_auth=mock_user_auth)
+        result = await ctx.get_provider_tokens(as_env_vars=True)
+
+        token_key = ProviderHandler.get_provider_env_key(
+            ProviderType.BITBUCKET_DATA_CENTER
+        )
+        host_key = ProviderHandler.get_provider_host_env_key(
+            ProviderType.BITBUCKET_DATA_CENTER
+        )
+        gh_host_key = ProviderHandler.get_provider_host_env_key(ProviderType.GITHUB)
+        assert host_key == 'bitbucket_data_center_host'
+        assert result[token_key] == 'user:dc_token'
+        assert result[host_key] == 'bitbucket.internal.example.com'
+        assert gh_host_key not in result
+
+    async def test_get_provider_tokens_as_env_vars_excludes_azure_host(self):
+        """Azure DevOps host is not exposed (its host field may hold a path)."""
+        mock_user_auth = AsyncMock()
+        mock_user_auth.get_provider_tokens = AsyncMock(
+            return_value={
+                ProviderType.AZURE_DEVOPS: ProviderToken(
+                    token=SecretStr('azure_token'),
+                    host='dev.azure.com/myorg/myproject',
+                ),
+            }
+        )
+
+        ctx = AuthUserContext(user_auth=mock_user_auth)
+        ctx.get_latest_token = AsyncMock(return_value=None)  # type: ignore[method-assign]
+        result = await ctx.get_provider_tokens(as_env_vars=True)
+
+        azure_host_key = ProviderHandler.get_provider_host_env_key(
+            ProviderType.AZURE_DEVOPS
+        )
+        assert azure_host_key not in result
+
     async def test_get_provider_tokens_as_env_vars_prefers_latest_token(self):
         """Provider env vars resolve through the provider service at call time."""
         mock_user_auth = AsyncMock()

@@ -408,6 +408,17 @@ class ProviderHandler:
         """Map ProviderType value to the environment variable name in the runtime"""
         return f'{provider.value}_token'.lower()
 
+    @classmethod
+    def get_provider_host_env_key(cls, provider: ProviderType) -> str:
+        """Map ProviderType value to the host environment variable name in the runtime.
+
+        Self-hosted providers (e.g. Bitbucket Data Center, self-managed GitLab)
+        have no fixed public domain, so the agent needs the configured host to
+        build REST API and git remote URLs — including before any repository is
+        cloned. This mirrors ``get_provider_env_key`` for the host value.
+        """
+        return f'{provider.value}_host'.lower()
+
     async def verify_repo_provider(
         self,
         repository: str,

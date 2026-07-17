@@ -11,9 +11,16 @@ triggers:
 You have access to an environment variable, `BITBUCKET_DATA_CENTER_TOKEN`, which contains
 a basic auth token in the format `username:your-token` that allows you to interact with the git repository.
 
+Because Bitbucket Data Center is self-hosted, there is no fixed domain like `bitbucket.org`.
+The host/domain is provided to you as the `BITBUCKET_DATA_CENTER_HOST` environment variable,
+which OpenHands injects into your environment alongside `BITBUCKET_DATA_CENTER_TOKEN` (it is
+available even before any repository is cloned). Substitute `${BITBUCKET_DATA_CENTER_HOST}`
+wherever you see `{domain}` below. In the rare case it is not set, ask the user for the host
+instead of guessing.
+
 You can also use this token to interact with Bitbucket Data Center's REST API:
 ```bash
-curl -u "${BITBUCKET_DATA_CENTER_TOKEN}" https://{domain}/rest/api/1.0/...
+curl -u "${BITBUCKET_DATA_CENTER_TOKEN}" "https://${BITBUCKET_DATA_CENTER_HOST}/rest/api/1.0/..."
 ```
 
 <IMPORTANT>
@@ -21,7 +28,7 @@ ALWAYS use the Bitbucket Data Center API for operations instead of a web browser
 ALWAYS use the `create_bitbucket_data_center_pr` tool to open a pull request
 </IMPORTANT>
 
-If you encounter authentication issues when pushing to Bitbucket Data Center (such as password prompts or permission errors), the old token may have expired. In such case, update the remote URL to include the current token: `git remote set-url origin https://${BITBUCKET_DATA_CENTER_TOKEN}@{domain}/scm/{project_lower}/{repo}.git`
+If you encounter authentication issues when pushing to Bitbucket Data Center (such as password prompts or permission errors), the old token may have expired. In such case, update the remote URL to include the current token: `git remote set-url origin https://${BITBUCKET_DATA_CENTER_TOKEN}@${BITBUCKET_DATA_CENTER_HOST}/scm/{project_lower}/{repo}.git`
 
 The repository format for Bitbucket Data Center is `PROJECT/repo_slug` (project key, slash, repo slug).
 
