@@ -770,12 +770,22 @@ class SaasSettingsStore(SettingsStore):
         llm_api_key = item.agent_settings.llm.api_key
 
         # First, check if our current key is valid
-        if llm_api_key and not await LiteLlmManager.verify_existing_key(
-            llm_api_key.get_secret_value(),  # type: ignore[union-attr]
-            self.user_id,
-            org_id,
-            openhands_type=openhands_type,
-        ):
+        key_is_valid = False
+        if llm_api_key:
+            key_val = (
+                llm_api_key.get_secret_value()
+                if hasattr(llm_api_key, 'get_secret_value')
+                else str(llm_api_key)
+            )
+            if key_val and key_val.strip():
+                key_is_valid = await LiteLlmManager.verify_existing_key(
+                    key_val,
+                    self.user_id,
+                    org_id,
+                    openhands_type=openhands_type,
+                )
+
+        if not key_is_valid:
             # Both branches mint one managed key per (user, org) under the same
             # deterministic alias, deleting any prior key first — so switching
             # the default to/from an openhands/* model never orphans a key.

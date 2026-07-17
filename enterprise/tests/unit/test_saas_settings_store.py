@@ -404,6 +404,36 @@ async def test_ensure_api_key_generates_new_key_when_verification_fails():
         )
 
 
+@pytest.mark.asyncio
+async def test_ensure_api_key_generates_new_key_when_api_key_is_none():
+    """When the API key is None, it should generate a new managed key."""
+    from storage.lite_llm_manager import get_openhands_cloud_key_alias
+
+    store = SaasSettingsStore('test-user-id-123')
+    new_key = 'sk-new-key'
+    item = _make_settings(model='openhands/gpt-4', api_key=None)
+    expected_alias = get_openhands_cloud_key_alias('test-user-id-123', 'org-123')
+
+    with (
+        patch(
+            'storage.saas_settings_store.LiteLlmManager.delete_key_by_alias',
+            new_callable=AsyncMock,
+        ) as mock_delete,
+        patch(
+            'storage.saas_settings_store.LiteLlmManager.generate_key',
+            new_callable=AsyncMock,
+            return_value=new_key,
+        ) as mock_generate,
+    ):
+        await store._ensure_api_key(item, 'org-123', openhands_type=True)
+
+        assert _secret_value(item, 'llm.api_key') == new_key
+        mock_delete.assert_awaited_once_with(key_alias=expected_alias)
+        mock_generate.assert_awaited_once_with(
+            'test-user-id-123', 'org-123', expected_alias, {'type': 'openhands'}
+        )
+
+
 @pytest.fixture
 def org_with_multiple_members_fixture(session_maker):
     """Set up an organization with multiple members for testing LLM settings propagation.
