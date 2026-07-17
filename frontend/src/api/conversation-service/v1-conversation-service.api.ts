@@ -451,6 +451,46 @@ class V1ConversationService {
   }
 
   /**
+   * Download a file or directory from the conversation's sandbox workspace
+   * @param conversationId The conversation ID
+   * @param filePath The file or directory path relative to workspace
+   * @returns An object with the blob and extracted/fallback filename
+   */
+  static async downloadConversationFile(
+    conversationId: string,
+    filePath: string,
+  ): Promise<{ blob: Blob; filename: string }> {
+    const params = new URLSearchParams();
+    params.append("path", filePath);
+
+    const response = await openHands.get(
+      `/api/v1/app-conversations/${conversationId}/download-file?${params.toString()}`,
+      {
+        responseType: "blob",
+      },
+    );
+
+    const contentDisposition = response.headers["content-disposition"];
+    let filename = "";
+    if (contentDisposition) {
+      const filenameMatch = contentDisposition.match(/filename="?([^"]+)"?/);
+      if (filenameMatch) {
+        const [, matchedFilename] = filenameMatch;
+        filename = matchedFilename;
+      }
+    }
+
+    if (!filename) {
+      filename = filePath.split("/").pop() || "download";
+      if (!filename.includes(".")) {
+        filename = `${filename}.zip`;
+      }
+    }
+
+    return { blob: response.data, filename };
+  }
+
+  /**
    * Get all skills associated with a V1 conversation
    * @param conversationId The conversation ID
    * @returns The available skills associated with the conversation

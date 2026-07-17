@@ -1,4 +1,6 @@
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { LuDownload } from "react-icons/lu";
 import RefreshIcon from "#/icons/u-refresh.svg?react";
 import { useUnifiedGetGitChanges } from "#/hooks/query/use-unified-get-git-changes";
 import { useHandleBuildPlanClick } from "#/hooks/use-handle-build-plan-click";
@@ -8,6 +10,8 @@ import { AgentState } from "#/types/agent-state";
 import { I18nKey } from "#/i18n/declaration";
 import { cn } from "#/utils/utils";
 import { Typography } from "#/ui/typography";
+import { useConversationId } from "#/hooks/use-conversation-id";
+import { DownloadModal } from "#/components/shared/modals/download-modal";
 
 type ConversationTabTitleProps = {
   title: string;
@@ -20,6 +24,8 @@ export function ConversationTabTitle({
   conversationKey,
 }: ConversationTabTitleProps) {
   const { t } = useTranslation();
+  const { conversationId } = useConversationId();
+  const [downloadModalIsOpen, setDownloadModalIsOpen] = useState(false);
   const { refetch, isFetching } = useUnifiedGetGitChanges();
   const { handleBuildPlanClick } = useHandleBuildPlanClick();
   const { curAgentState } = useAgentState();
@@ -70,6 +76,25 @@ export function ConversationTabTitle({
             {t(I18nKey.COMMON$BUILD)} ⌘↩
           </Typography.Text>
         </button>
+      )}
+      {conversationKey === "vscode" && conversationId && (
+        <>
+          <button
+            type="button"
+            className="flex w-[26px] py-1 justify-center items-center gap-[10px] rounded-[7px] hover:bg-[#474A54] cursor-pointer"
+            onClick={() => setDownloadModalIsOpen(true)}
+            data-testid="vscode-tab-download-button"
+            title={t("DOWNLOAD$TITLE")}
+          >
+            <LuDownload className="w-3.5 h-3.5 text-white" />
+          </button>
+          {downloadModalIsOpen && (
+            <DownloadModal
+              conversationId={conversationId}
+              onClose={() => setDownloadModalIsOpen(false)}
+            />
+          )}
+        </>
       )}
     </div>
   );

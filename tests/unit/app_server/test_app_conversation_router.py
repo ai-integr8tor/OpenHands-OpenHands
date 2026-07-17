@@ -24,6 +24,7 @@ from openhands.app_server.app_conversation.app_conversation_router import (
     _finalize_sandbox_delete,
     batch_get_app_conversations,
     count_app_conversations,
+    download_conversation_file,
     get_conversation_git_changes,
     get_conversation_git_diff,
     search_app_conversations,
@@ -1169,3 +1170,237 @@ class TestFinalizeSandboxDelete:
             conversation_id=conv.hex,
             workspace_path='/home/openhands/workspace/' + conv.hex,
         )
+
+
+@pytest.mark.asyncio
+class TestDownloadConversationFile:
+    """Test suite for download_conversation_file router endpoint."""
+
+    async def test_download_file_happy_path(self):
+        conv_id = uuid4()
+        ctx = _make_agent_server_context(conv_id)
+        ctx.sandbox_spec.working_dir = '/workspace/project'
+
+        mock_workspace = MagicMock()
+        mock_result = MagicMock()
+        mock_result.exit_code = 0
+        mock_result.stdout = json.dumps(
+            {
+                'status': 'OK',
+                'exists': True,
+                'is_dir': False,
+                'resolved_path': '/workspace/project/file.txt',
+                'size': 123,
+            }
+        )
+        mock_workspace.execute_command = AsyncMock(return_value=mock_result)
+
+        async def mock_iter_bytes(*args, **kwargs):
+            yield b'file chunk content'
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.aiter_bytes = mock_iter_bytes
+
+        mock_stream = MagicMock()
+        mock_stream.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_stream.__aexit__ = AsyncMock()
+
+        mock_client = MagicMock()
+        mock_client.stream = MagicMock(return_value=mock_stream)
+        mock_client.aclose = AsyncMock()
+
+        with (
+            patch(
+                'openhands.app_server.app_conversation.app_conversation_router._get_agent_server_context',
+                new=AsyncMock(return_value=ctx),
+            ),
+            patch(
+                'openhands.app_server.app_conversation.app_conversation_router.AsyncRemoteWorkspace',
+                return_value=mock_workspace,
+            ),
+            patch(
+                'httpx.AsyncClient',
+                return_value=mock_client,
+            ),
+        ):
+            response = await download_conversation_file(
+                conversation_id=conv_id,
+                path='file.txt',
+                app_conversation_service=MagicMock(),
+                sandbox_service=MagicMock(),
+                sandbox_spec_service=MagicMock(),
+            )
+
+        assert response.media_type == 'application/octet-stream'
+        assert (
+            response.headers['Content-Disposition'] == 'attachment; filename="file.txt"'
+        )
+
+        # Read/consume the response stream chunks
+        chunks = [chunk async for chunk in response.body_iterator]
+        assert chunks == [b'file chunk content']
+
+    async def test_download_directory_happy_path(self):
+        conv_id = uuid4()
+        ctx = _make_agent_server_context(conv_id)
+        ctx.sandbox_spec.working_dir = '/workspace/project'
+
+        mock_workspace = MagicMock()
+        # Mock inspection response
+        mock_inspect_result = MagicMock()
+        mock_inspect_result.exit_code = 0
+        mock_inspect_result.stdout = json.dumps(
+            {
+                'status': 'OK',
+                'exists': True,
+                'is_dir': True,
+                'resolved_path': '/workspace/project/my_dir',
+                'size': 0,
+            }
+        )
+        # Mock zipping response
+        mock_zip_result = MagicMock()
+        mock_zip_result.exit_code = 0
+
+        mock_workspace.execute_command = AsyncMock(
+            side_effect=[mock_inspect_result, mock_zip_result, MagicMock()]
+        )
+
+        async def mock_iter_bytes(*args, **kwargs):
+            yield b'zip content chunks'
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.aiter_bytes = mock_iter_bytes
+
+        mock_stream = MagicMock()
+        mock_stream.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_stream.__aexit__ = AsyncMock()
+
+        mock_client = MagicMock()
+        mock_client.stream = MagicMock(return_value=mock_stream)
+        mock_client.aclose = AsyncMock()
+
+        with (
+            patch(
+                'openhands.app_server.app_conversation.app_conversation_router._get_agent_server_context',
+                new=AsyncMock(return_value=ctx),
+            ),
+            patch(
+                'openhands.app_server.app_conversation.app_conversation_router.AsyncRemoteWorkspace',
+                return_value=mock_workspace,
+            ),
+            patch(
+                'httpx.AsyncClient',
+                return_value=mock_client,
+            ),
+        ):
+            response = await download_conversation_file(
+                conversation_id=conv_id,
+                path='my_dir',
+                app_conversation_service=MagicMock(),
+                sandbox_service=MagicMock(),
+                sandbox_spec_service=MagicMock(),
+            )
+
+        assert response.media_type == 'application/zip'
+        assert (
+            response.headers['Content-Disposition']
+            == 'attachment; filename="my_dir.zip"'
+        )
+
+        chunks = [chunk async for chunk in response.body_iterator]
+        assert chunks == [b'zip content chunks']
+
+    async def test_download_path_traversal_returns_400(self):
+        conv_id = uuid4()
+        ctx = _make_agent_server_context(conv_id)
+        ctx.sandbox_spec.working_dir = '/workspace/project'
+
+        mock_workspace = MagicMock()
+        mock_result = MagicMock()
+        mock_result.exit_code = 0
+        mock_result.stdout = json.dumps(
+            {'status': 'ERROR', 'message': 'Path traversal detected'}
+        )
+        mock_workspace.execute_command = AsyncMock(return_value=mock_result)
+
+        with (
+            patch(
+                'openhands.app_server.app_conversation.app_conversation_router._get_agent_server_context',
+                new=AsyncMock(return_value=ctx),
+            ),
+            patch(
+                'openhands.app_server.app_conversation.app_conversation_router.AsyncRemoteWorkspace',
+                return_value=mock_workspace,
+            ),
+        ):
+            with pytest.raises(HTTPException) as exc_info:
+                await download_conversation_file(
+                    conversation_id=conv_id,
+                    path='../../etc/passwd',
+                    app_conversation_service=MagicMock(),
+                    sandbox_service=MagicMock(),
+                    sandbox_spec_service=MagicMock(),
+                )
+            assert exc_info.value.status_code == 400
+            assert exc_info.value.detail == 'Path traversal detected'
+
+    async def test_download_missing_file_returns_404(self):
+        conv_id = uuid4()
+        ctx = _make_agent_server_context(conv_id)
+        ctx.sandbox_spec.working_dir = '/workspace/project'
+
+        mock_workspace = MagicMock()
+        mock_result = MagicMock()
+        mock_result.exit_code = 0
+        mock_result.stdout = json.dumps(
+            {
+                'status': 'OK',
+                'exists': False,
+                'is_dir': False,
+                'resolved_path': '/workspace/project/missing.txt',
+                'size': 0,
+            }
+        )
+        mock_workspace.execute_command = AsyncMock(return_value=mock_result)
+
+        with (
+            patch(
+                'openhands.app_server.app_conversation.app_conversation_router._get_agent_server_context',
+                new=AsyncMock(return_value=ctx),
+            ),
+            patch(
+                'openhands.app_server.app_conversation.app_conversation_router.AsyncRemoteWorkspace',
+                return_value=mock_workspace,
+            ),
+        ):
+            with pytest.raises(HTTPException) as exc_info:
+                await download_conversation_file(
+                    conversation_id=conv_id,
+                    path='missing.txt',
+                    app_conversation_service=MagicMock(),
+                    sandbox_service=MagicMock(),
+                    sandbox_spec_service=MagicMock(),
+                )
+            assert exc_info.value.status_code == 404
+            assert exc_info.value.detail == 'File or directory not found'
+
+    async def test_download_paused_sandbox_returns_409(self):
+        conv_id = uuid4()
+
+        with patch(
+            'openhands.app_server.app_conversation.app_conversation_router._get_agent_server_context',
+            new=AsyncMock(return_value=None),
+        ):
+            with pytest.raises(HTTPException) as exc_info:
+                await download_conversation_file(
+                    conversation_id=conv_id,
+                    path='file.txt',
+                    app_conversation_service=MagicMock(),
+                    sandbox_service=MagicMock(),
+                    sandbox_spec_service=MagicMock(),
+                )
+            assert exc_info.value.status_code == 409
+            assert exc_info.value.detail == 'Sandbox is paused'

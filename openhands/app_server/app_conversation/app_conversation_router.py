@@ -1656,6 +1656,204 @@ async def export_conversation(
         )
 
 
+@router.get('/{conversation_id}/download-file')
+async def download_conversation_file(
+    conversation_id: UUID,
+    path: str,
+    app_conversation_service: AppConversationService = (
+        app_conversation_service_dependency
+    ),
+    sandbox_service: SandboxService = sandbox_service_dependency,
+    sandbox_spec_service: SandboxSpecService = sandbox_spec_service_dependency,
+):
+    """Download a file or directory from the sandbox workspace.
+
+    If it is a directory, it will be zipped on-demand.
+    """
+    import shlex
+    import uuid
+    from pathlib import Path
+
+    ctx = await _get_agent_server_context(
+        conversation_id=conversation_id,
+        app_conversation_service=app_conversation_service,
+        sandbox_service=sandbox_service,
+        sandbox_spec_service=sandbox_spec_service,
+    )
+    if isinstance(ctx, JSONResponse):
+        return ctx
+    if ctx is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail='Sandbox is paused',
+        )
+
+    remote_workspace = AsyncRemoteWorkspace(
+        host=ctx.agent_server_url,
+        api_key=ctx.session_api_key,
+        working_dir=ctx.sandbox_spec.working_dir,
+    )
+
+    # 1. Run validation & inspection script in the sandbox
+    py_script = """
+import os, sys, pathlib, json
+base = pathlib.Path(sys.argv[1]).resolve()
+req = pathlib.Path(sys.argv[2])
+try:
+    if req.is_absolute():
+        resolved = req.resolve()
+    else:
+        resolved = (base / req).resolve()
+
+    # Path traversal check
+    resolved.relative_to(base)
+
+    exists = resolved.exists()
+    is_dir = resolved.is_dir() if exists else False
+    size = resolved.stat().st_size if exists and not is_dir else 0
+    print(json.dumps({
+        "status": "OK",
+        "exists": exists,
+        "is_dir": is_dir,
+        "resolved_path": str(resolved),
+        "size": size
+    }))
+except ValueError:
+    print(json.dumps({
+        "status": "ERROR",
+        "message": "Path traversal detected"
+    }))
+except Exception as e:
+    print(json.dumps({
+        "status": "ERROR",
+        "message": str(e)
+    }))
+"""
+    cmd = f'python3 -c {shlex.quote(py_script)} {shlex.quote(ctx.sandbox_spec.working_dir)} {shlex.quote(path.strip())}'
+    result = await remote_workspace.execute_command(cmd)
+    if result.exit_code != 0:
+        raise HTTPException(
+            status_code=500,
+            detail=f'Failed to inspect path in sandbox: {result.stderr or result.stdout}',
+        )
+
+    try:
+        info = json.loads(result.stdout.strip())
+    except Exception:
+        raise HTTPException(
+            status_code=500,
+            detail=f'Invalid response from path inspection: {result.stdout}',
+        )
+
+    if info.get('status') == 'ERROR':
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=info.get('message')
+        )
+
+    if not info.get('exists'):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail='File or directory not found'
+        )
+
+    is_dir = info.get('is_dir')
+    resolved_path = info.get('resolved_path')
+
+    # 2. Handle directory zipping
+    archive_path = None
+    if is_dir:
+        archive_id = uuid.uuid4().hex
+        archive_base = f'/tmp/dir_download_{archive_id}'
+        archive_path = f'{archive_base}.zip'
+
+        path_obj = Path(resolved_path)
+        parent_dir = path_obj.parent
+        dir_name = path_obj.name
+
+        if parent_dir == path_obj:
+            zip_script = f"import shutil; shutil.make_archive('{archive_base}', 'zip', root_dir='{resolved_path}')"
+        else:
+            zip_script = f"import shutil; shutil.make_archive('{archive_base}', 'zip', root_dir='{parent_dir}', base_dir='{dir_name}')"
+
+        zip_cmd = f'python3 -c {shlex.quote(zip_script)}'
+        zip_result = await remote_workspace.execute_command(zip_cmd)
+
+        if zip_result.exit_code != 0:
+            raise HTTPException(
+                status_code=500,
+                detail=f'Failed to compress directory: {zip_result.stderr or zip_result.stdout}',
+            )
+
+        resolved_path = archive_path
+        filename = f'{dir_name}.zip'
+        media_type = 'application/zip'
+    else:
+        filename = Path(resolved_path).name
+        media_type = 'application/octet-stream'
+
+    # 3. Stream the file from agent-server
+    download_url = f'{ctx.agent_server_url}/api/file/download'
+    params = {'path': resolved_path}
+    headers = {}
+    if ctx.session_api_key:
+        headers['X-API-Key'] = ctx.session_api_key
+
+    client = httpx.AsyncClient(timeout=120.0)
+    try:
+        stream_ctx = client.stream('GET', download_url, params=params, headers=headers)
+        response = await stream_ctx.__aenter__()
+
+        if response.status_code != 200:
+            err_content = await response.aread()
+            await stream_ctx.__aexit__(None, None, None)
+            await client.aclose()
+
+            # Clean up temp archive if any
+            if archive_path:
+                try:
+                    await remote_workspace.execute_command(f'rm -f {archive_path}')
+                except Exception:
+                    pass
+
+            raise HTTPException(
+                status_code=response.status_code,
+                detail=f'Failed to stream file from sandbox: {err_content.decode("utf-8")}',
+            )
+
+        async def chunk_generator():
+            try:
+                async for chunk in response.aiter_bytes(chunk_size=8192):
+                    yield chunk
+            finally:
+                await stream_ctx.__aexit__(None, None, None)
+                await client.aclose()
+                if archive_path:
+                    try:
+                        await remote_workspace.execute_command(f'rm -f {archive_path}')
+                    except Exception:
+                        pass
+
+        return StreamingResponse(
+            chunk_generator(),
+            media_type=media_type,
+            headers={
+                'Content-Disposition': f'attachment; filename="{filename}"',
+                'Access-Control-Expose-Headers': 'Content-Disposition',
+            },
+        )
+    except Exception as e:
+        await client.aclose()
+        if archive_path:
+            try:
+                await remote_workspace.execute_command(f'rm -f {archive_path}')
+            except Exception:
+                pass
+        if isinstance(e, HTTPException):
+            raise e
+        raise HTTPException(
+            status_code=500, detail=f'Error starting file download: {str(e)}'
+        )
+
+
 async def _consume_remaining(
     async_iter, db_session: AsyncSession, httpx_client: httpx.AsyncClient
 ):
