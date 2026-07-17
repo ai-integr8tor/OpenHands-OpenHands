@@ -1008,9 +1008,9 @@ class TestApiKeyOrgIdHandling:
     ):
         """Test that API key's org_id is used when saving conversation via API key auth.
 
-        This tests the main bug fix: when a user creates an API key in Personal Workspace,
+        This tests the main bug fix: when a user creates an API key in My Workspace,
         then switches to OpenHands org in browser, and uses the API key to create a
-        conversation, the conversation should be saved in Personal Workspace (API key's org),
+        conversation, the conversation should be saved in My Workspace (API key's org),
         not OpenHands (user's current org).
         """
         from dataclasses import dataclass

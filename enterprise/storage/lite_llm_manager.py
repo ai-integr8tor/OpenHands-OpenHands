@@ -78,12 +78,12 @@ def get_byor_key_alias(keycloak_user_id: str, org_id: str) -> str:
 def get_org_team_alias(org_id: str, org_name: str | None, user_id: str | None) -> str:
     """Human-readable LiteLLM team_alias for an org's team.
 
-    Personal orgs (org_id == user_id) get "Personal Workspace"; team orgs use
+    Personal orgs (org_id == user_id) get "My Workspace"; team orgs use
     their display name. Falls back to the id when no name is available, never
     the bare user uid (which made teams indistinguishable in the dashboard).
     """
     if str(org_id) == str(user_id):
-        return 'Personal Workspace'
+        return 'My Workspace'
     return org_name or f'Organization {org_id}'
 
 

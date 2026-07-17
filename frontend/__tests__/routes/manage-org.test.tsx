@@ -78,7 +78,7 @@ vi.mock("react-i18next", async () => {
       t: (key: string) => {
         const translations: Record<string, string> = {
           ORG$SELECT_ORGANIZATION_PLACEHOLDER: "Please select an organization",
-          ORG$PERSONAL_WORKSPACE: "Personal Workspace",
+          ORG$PERSONAL_WORKSPACE: "My Workspace",
         };
         return translations[key] || key;
       },
@@ -214,7 +214,7 @@ describe("Manage Org Route", () => {
 
     await waitFor(() => {
       const orgName = screen.getByTestId("org-name");
-      expect(orgName).toHaveTextContent("Personal Workspace");
+      expect(orgName).toHaveTextContent("My Workspace");
     });
   });
 
@@ -321,7 +321,7 @@ describe("Manage Org Route", () => {
 
       const orgName = screen.getByTestId("org-name");
       await waitFor(() =>
-        expect(orgName).toHaveTextContent("Personal Workspace"),
+        expect(orgName).toHaveTextContent("My Workspace"),
       );
 
       expect(

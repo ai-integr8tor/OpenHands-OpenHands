@@ -37,7 +37,7 @@ vi.mock("react-i18next", async () => {
       t: (key: string, params?: Record<string, string>) => {
         const translations: Record<string, string> = {
           "ORG$SELECT_ORGANIZATION_PLACEHOLDER": "Please select an organization",
-          "ORG$PERSONAL_WORKSPACE": "Personal Workspace",
+          "ORG$PERSONAL_WORKSPACE": "My Workspace",
           "ORG$SWITCHED_TO_ORGANIZATION": `You have switched to organization: ${params?.name ?? ""}`,
           "ORG$SWITCHED_TO_PERSONAL_WORKSPACE":
             "You have switched to your personal workspace.",
@@ -114,7 +114,7 @@ describe("OrgSelector", () => {
     // The combobox input should show the first org name
     await waitFor(() => {
       const input = screen.getByRole("combobox");
-      expect(input).toHaveValue("Personal Workspace");
+      expect(input).toHaveValue("My Workspace");
     });
   });
 
@@ -134,7 +134,7 @@ describe("OrgSelector", () => {
     // Wait for the selector to be populated with the first organization
     await waitFor(() => {
       const input = screen.getByRole("combobox");
-      expect(input).toHaveValue("Personal Workspace");
+      expect(input).toHaveValue("My Workspace");
     });
 
     // Click the trigger to open dropdown
@@ -146,7 +146,7 @@ describe("OrgSelector", () => {
     const options = within(listbox).getAllByRole("option");
 
     expect(options).toHaveLength(3);
-    expect(options[0]).toHaveTextContent("Personal Workspace");
+    expect(options[0]).toHaveTextContent("My Workspace");
     expect(options[1]).toHaveTextContent("Acme Corp");
     expect(options[2]).toHaveTextContent("Test Organization");
   });
@@ -165,7 +165,7 @@ describe("OrgSelector", () => {
     renderOrgSelector();
 
     await waitFor(() => {
-      expect(screen.getByRole("combobox")).toHaveValue("Personal Workspace");
+      expect(screen.getByRole("combobox")).toHaveValue("My Workspace");
     });
 
     // Act
@@ -193,7 +193,7 @@ describe("OrgSelector", () => {
     renderOrgSelector();
 
     await waitFor(() => {
-      expect(screen.getByRole("combobox")).toHaveValue("Personal Workspace");
+      expect(screen.getByRole("combobox")).toHaveValue("My Workspace");
     });
 
     // Act
@@ -227,7 +227,7 @@ describe("OrgSelector", () => {
     renderOrgSelector();
 
     await waitFor(() => {
-      expect(screen.getByRole("combobox")).toHaveValue("Personal Workspace");
+      expect(screen.getByRole("combobox")).toHaveValue("My Workspace");
     });
 
     // Act
@@ -274,7 +274,7 @@ describe("OrgSelector", () => {
     const trigger = screen.getByTestId("dropdown-trigger");
     await user.click(trigger);
     const listbox = await screen.findByRole("listbox");
-    const personalOption = within(listbox).getByText("Personal Workspace");
+    const personalOption = within(listbox).getByText("My Workspace");
     await user.click(personalOption);
 
     // Assert

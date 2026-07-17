@@ -77,7 +77,7 @@ describe("useOrganizations", () => {
     mockGetOrganizations.mockResolvedValue({
       items: [
         createMinimalOrg("3", "Beta LLC", false),
-        createMinimalOrg("1", "Personal Workspace", true),
+        createMinimalOrg("1", "My Workspace", true),
         createMinimalOrg("2", "Acme Corp", false),
         createMinimalOrg("4", "All Hands AI", false),
       ],
@@ -94,7 +94,7 @@ describe("useOrganizations", () => {
     expect(organizations).toHaveLength(4);
     expect(organizations[0].id).toBe("1");
     expect(organizations[0].is_personal).toBe(true);
-    expect(organizations[0].name).toBe("Personal Workspace");
+    expect(organizations[0].name).toBe("My Workspace");
     expect(organizations[1].name).toBe("Acme Corp");
     expect(organizations[2].name).toBe("All Hands AI");
     expect(organizations[3].name).toBe("Beta LLC");
@@ -176,7 +176,7 @@ describe("useOrganizations", () => {
     };
     mockGetOrganizations.mockResolvedValue({
       items: [
-        createMinimalOrg("1", "Personal Workspace", true),
+        createMinimalOrg("1", "My Workspace", true),
         createMinimalOrg("2", "Acme Corp", false),
       ],
       currentOrgId: "1",
@@ -200,7 +200,7 @@ describe("useOrganizations", () => {
       feature_flags: { hide_personal_workspaces: true },
     };
     mockGetOrganizations.mockResolvedValue({
-      items: [createMinimalOrg("1", "Personal Workspace", true)],
+      items: [createMinimalOrg("1", "My Workspace", true)],
       currentOrgId: "1",
     });
 
@@ -220,7 +220,7 @@ describe("useOrganizations", () => {
   it("does not filter personal workspaces when the flag is off", async () => {
     mockGetOrganizations.mockResolvedValue({
       items: [
-        createMinimalOrg("1", "Personal Workspace", true),
+        createMinimalOrg("1", "My Workspace", true),
         createMinimalOrg("2", "Acme Corp", false),
       ],
       currentOrgId: "1",

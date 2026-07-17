@@ -72,7 +72,7 @@ export const createMockOrganization = (
 // Named mock organizations for test convenience
 export const MOCK_PERSONAL_ORG = createMockOrganization(
   "1",
-  "Personal Workspace",
+  "My Workspace",
   100,
   true,
 );
@@ -277,7 +277,7 @@ export const ORG_HANDLERS = [
 
     let role: OrganizationUserRole = "member";
     switch (orgId) {
-      case "1": // Personal Workspace
+      case "1": // My Workspace
         role = "owner";
         break;
       case "2": // Acme Corp

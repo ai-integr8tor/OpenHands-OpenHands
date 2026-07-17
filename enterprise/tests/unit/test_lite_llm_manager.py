@@ -43,7 +43,7 @@ class TestOrgTeamAlias:
 
     def test_personal_org_labeled_personal_workspace(self):
         # Personal org: org_id == user_id.
-        assert get_org_team_alias('user-1', 'ignored', 'user-1') == 'Personal Workspace'
+        assert get_org_team_alias('user-1', 'ignored', 'user-1') == 'My Workspace'
 
     def test_team_org_uses_display_name(self):
         assert get_org_team_alias('org-2', 'Acme Inc', 'user-1') == 'Acme Inc'
@@ -59,7 +59,7 @@ class TestOrgTeamAlias:
             'storage.org_store.OrgStore.get_org_by_id', new_callable=AsyncMock
         ) as mock_get:
             alias = await LiteLlmManager._team_alias_for_org('user-1', 'user-1')
-        assert alias == 'Personal Workspace'
+        assert alias == 'My Workspace'
         mock_get.assert_not_called()
 
     @pytest.mark.asyncio
@@ -691,7 +691,7 @@ class TestLiteLlmManager:
             patch.object(
                 LiteLlmManager,
                 '_team_alias_for_org',
-                new=AsyncMock(return_value='Personal Workspace'),
+                new=AsyncMock(return_value='My Workspace'),
             ),
             # Pre-check sees the orphan; post-create verify sees the clean user.
             patch.object(
@@ -740,7 +740,7 @@ class TestLiteLlmManager:
             patch.object(
                 LiteLlmManager,
                 '_team_alias_for_org',
-                new=AsyncMock(return_value='Personal Workspace'),
+                new=AsyncMock(return_value='My Workspace'),
             ),
             # Pre-check: absent; post-create verify: present.
             patch.object(
@@ -796,7 +796,7 @@ class TestLiteLlmManager:
             patch.object(
                 LiteLlmManager,
                 '_team_alias_for_org',
-                new=AsyncMock(return_value='Personal Workspace'),
+                new=AsyncMock(return_value='My Workspace'),
             ),
             patch.object(
                 LiteLlmManager, '_user_exists', new=AsyncMock(return_value=True)
@@ -871,7 +871,7 @@ class TestLiteLlmManager:
             patch.object(
                 LiteLlmManager,
                 '_team_alias_for_org',
-                new=AsyncMock(return_value='Personal Workspace'),
+                new=AsyncMock(return_value='My Workspace'),
             ),
         ):
             result = await LiteLlmManager.create_entries(

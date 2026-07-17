@@ -38,7 +38,7 @@ vi.mock("react-i18next", async () => {
       t: (key: string) => {
         const translations: Record<string, string> = {
           ORG$SELECT_ORGANIZATION_PLACEHOLDER: "Please select an organization",
-          ORG$PERSONAL_WORKSPACE: "Personal Workspace",
+          ORG$PERSONAL_WORKSPACE: "My Workspace",
         };
         return translations[key] || key;
       },
