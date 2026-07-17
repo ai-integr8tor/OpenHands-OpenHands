@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { convertImageToBase64 } from "#/utils/convert-image-to-base-64";
 import { createChatMessage } from "#/services/chat-service";
 import { BtwMessages } from "./btw-messages";
+import { GoalStatusBanner } from "./goal-status-banner";
 import { ModelMessages } from "./model-messages";
 import { InteractiveChatBox } from "./interactive-chat-box";
 import { AgentState } from "#/types/agent-state";
@@ -281,6 +282,9 @@ export function ChatInterface() {
 
         <div className="flex flex-col gap-[6px]">
           <BtwMessages conversationId={params.conversationId} />
+          {/* Live goal-loop status pins above the input while a /goal runs; the
+              terminal status renders inline in the timeline once it ends. */}
+          <GoalStatusBanner conversationId={params.conversationId} />
           <div className="flex justify-between relative">
             <div className="flex items-end gap-1">
               <ConfirmationModeEnabled />

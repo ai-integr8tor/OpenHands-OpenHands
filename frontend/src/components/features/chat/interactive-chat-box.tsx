@@ -3,6 +3,7 @@ import { displayErrorToast } from "#/utils/custom-toast-handlers";
 import { validateFiles } from "#/utils/file-validation";
 import { CustomChatInput } from "./custom-chat-input";
 import { useBtwInterceptor } from "#/hooks/chat/use-btw-interceptor";
+import { useGoalInterceptor } from "#/hooks/chat/use-goal-interceptor";
 import { useModelInterceptor } from "#/hooks/chat/use-model-interceptor";
 import { AgentState } from "#/types/agent-state";
 import { useActiveConversation } from "#/hooks/query/use-active-conversation";
@@ -144,7 +145,8 @@ export function InteractiveChatBox({
     onSubmit(message, images, files);
     clearAllFiles();
   };
-  const handleAfterModel = useBtwInterceptor(conversationId, submitWithFiles);
+  const handleAfterGoal = useBtwInterceptor(conversationId, submitWithFiles);
+  const handleAfterModel = useGoalInterceptor(conversationId, handleAfterGoal);
   const handleSubmit = useModelInterceptor(conversationId, handleAfterModel);
 
   const handleSuggestionsClick = (suggestion: string) => {

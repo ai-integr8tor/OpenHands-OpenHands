@@ -11,6 +11,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useWebSocket, WebSocketHookOptions } from "#/hooks/use-websocket";
 import { useEventStore } from "#/stores/use-event-store";
 import { useModelStore } from "#/stores/model-store";
+import { useGoalStore } from "#/stores/goal-store";
 import { getRenderedV1Events } from "#/components/v1/chat/event-content-helpers/should-render-event";
 import { updateConversationLlmModelInCache } from "#/hooks/mutation/conversation-mutation-utils";
 import { useErrorMessageStore } from "#/stores/error-message-store";
@@ -27,6 +28,7 @@ import {
   isFullStateConversationStateUpdateEvent,
   isAgentStatusConversationStateUpdateEvent,
   isStatsConversationStateUpdateEvent,
+  isGoalConversationStateUpdateEvent,
   isSwitchLLMObservationEvent,
   isExecuteBashActionEvent,
   isExecuteBashObservationEvent,
@@ -458,6 +460,12 @@ export function ConversationWebSocketProvider({
             if (isStatsConversationStateUpdateEvent(event)) {
               updateMetricsFromStats(event);
             }
+            // Mirror goal status into the store so the live GoalStatusBanner
+            // advances. The terminal (inactive) status also renders inline in
+            // the timeline; the banner hides once the loop ends.
+            if (isGoalConversationStateUpdateEvent(event) && conversationId) {
+              useGoalStore.getState().setStatus(conversationId, event.value);
+            }
           }
 
           // The agent switched its own LLM (via the built-in switch_llm tool).
@@ -653,6 +661,12 @@ export function ConversationWebSocketProvider({
             }
             if (isStatsConversationStateUpdateEvent(event)) {
               updateMetricsFromStats(event);
+            }
+            // Mirror goal status into the store so the live GoalStatusBanner
+            // advances. The terminal (inactive) status also renders inline in
+            // the timeline; the banner hides once the loop ends.
+            if (isGoalConversationStateUpdateEvent(event) && conversationId) {
+              useGoalStore.getState().setStatus(conversationId, event.value);
             }
           }
 

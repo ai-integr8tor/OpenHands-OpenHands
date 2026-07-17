@@ -235,6 +235,36 @@ class V1ConversationService {
   }
 
   /**
+   * Start a `/goal` loop on a V1 conversation. The agent server drives the
+   * agent toward the objective, judging completion after each run until it is
+   * done or `maxIterations` is reached, streaming progress as goal
+   * ConversationStateUpdateEvents over the conversation's event stream.
+   * @param conversationId The conversation ID
+   * @param conversationUrl The conversation URL
+   * @param objective The objective to pursue and audit
+   * @param maxIterations Optional cap on audit rounds (server defaults to 10)
+   * @param sessionApiKey Session API key for authentication
+   */
+  static async startGoal(
+    conversationId: string,
+    conversationUrl: string | null | undefined,
+    objective: string,
+    maxIterations?: number,
+    sessionApiKey?: string | null,
+  ): Promise<void> {
+    const url = this.buildRuntimeUrl(
+      conversationUrl,
+      `/api/conversations/${conversationId}/goal`,
+    );
+    const headers = buildSessionHeaders(sessionApiKey);
+    const body: { objective: string; max_iterations?: number } = { objective };
+    if (maxIterations !== undefined) {
+      body.max_iterations = maxIterations;
+    }
+    await axios.post(url, body, { headers });
+  }
+
+  /**
    * Switch the running conversation's LLM to a saved profile.
    * Goes through the app-server proxy, which loads the profile from user
    * settings (with api_key) and hands the LLM to the agent-server's

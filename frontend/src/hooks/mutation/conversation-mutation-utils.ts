@@ -69,6 +69,28 @@ export const askV1Agent = async (
 };
 
 /**
+ * Start a `/goal` loop on a V1 conversation. The agent server drives the agent
+ * toward the objective, judging completion after each run until it is done or
+ * `maxIterations` is reached, streaming progress as goal
+ * ConversationStateUpdateEvents over the conversation's event stream.
+ */
+export const startV1Goal = async (
+  conversationId: string,
+  objective: string,
+  maxIterations?: number,
+): Promise<void> => {
+  const { conversationUrl, sessionApiKey } =
+    await fetchV1ConversationData(conversationId);
+  return V1ConversationService.startGoal(
+    conversationId,
+    conversationUrl,
+    objective,
+    maxIterations,
+    sessionApiKey,
+  );
+};
+
+/**
  * Resumes a V1 conversation sandbox by fetching the sandbox_id and resuming it
  */
 export const resumeV1ConversationSandbox = async (conversationId: string) => {

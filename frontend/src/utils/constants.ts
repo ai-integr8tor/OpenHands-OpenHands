@@ -79,6 +79,9 @@ export const BTW_COMMAND = "/btw";
 /** The /model slash command — lists or switches the conversation's LLM profile. */
 export const MODEL_COMMAND = "/model";
 
+/** The /goal slash command — drives the agent toward an objective, judging completion each round. */
+export const GOAL_COMMAND = "/goal";
+
 /** Built-in slash commands surfaced in the menu for V1 conversations. */
 export const BUILT_IN_COMMANDS: SlashCommandItem[] = [
   {
@@ -108,6 +111,16 @@ export const BUILT_IN_COMMANDS: SlashCommandItem[] = [
       triggers: [MODEL_COMMAND],
     },
     command: MODEL_COMMAND,
+  },
+  {
+    skill: {
+      name: "goal",
+      type: "agentskills",
+      content:
+        "Drive the agent toward an objective until a judge says it's done — /goal <objective> or /goal --max <n> <objective>",
+      triggers: [GOAL_COMMAND],
+    },
+    command: GOAL_COMMAND,
   },
 ];
 
