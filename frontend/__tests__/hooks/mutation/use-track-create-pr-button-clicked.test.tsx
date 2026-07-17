@@ -5,6 +5,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { analyticsEventsService } from "#/api/analytics-service/analytics-events.api";
 import { useTrackCreatePrButtonClicked } from "#/hooks/mutation/use-track-create-pr-button-clicked";
 
+const mockCapture = vi.fn();
+vi.mock("posthog-js/react", () => ({
+  usePostHog: () => ({ capture: mockCapture }),
+}));
+
 describe("useTrackCreatePrButtonClicked", () => {
   let queryClient: QueryClient;
 
@@ -36,6 +41,24 @@ describe("useTrackCreatePrButtonClicked", () => {
     await waitFor(() => {
       expect(spy).toHaveBeenCalledWith({
         event_type: "create pr button clicked",
+        git_provider: "github",
+      });
+    });
+  });
+
+  it("fires a client-side posthog.capture for survey targeting", async () => {
+    vi.spyOn(analyticsEventsService, "trackEvent").mockResolvedValue({
+      status: "ok",
+    });
+
+    const { result } = renderHook(() => useTrackCreatePrButtonClicked(), {
+      wrapper,
+    });
+
+    result.current.mutate("github");
+
+    await waitFor(() => {
+      expect(mockCapture).toHaveBeenCalledWith("create pr button clicked", {
         git_provider: "github",
       });
     });
