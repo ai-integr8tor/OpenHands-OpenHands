@@ -194,6 +194,7 @@ def test_infer_repo_from_message():
         # FDE-86 (1finity): trailing punctuation must not drop a mention, and a
         # Jira/markdown link-wrapped clone URL must still resolve.
         ('Is this merged into PF/meta-fnos-pf?', ['PF/meta-fnos-pf']),
+        ('Please fix ACME-PROJECT/backend-api!', ['ACME-PROJECT/backend-api']),
         ('Please look at acme/widgets!', ['acme/widgets']),
         ('Check acme/widgets; thanks', ['acme/widgets']),
         ('The fix is in acme/widgets.', ['acme/widgets']),
@@ -205,6 +206,15 @@ def test_infer_repo_from_message():
             'see [https://bitbucket.fnc.fujitsu.com/scm/pf/meta-fnos-pf.git|'
             'https://bitbucket.fnc.fujitsu.com/scm/pf/meta-fnos-pf.git]',
             ['pf/meta-fnos-pf'],
+        ),
+        # Semicolon as delimiter between multiple repos (not just trailing punctuation)
+        (
+            'Check these repos: frontend/app; backend/api',
+            ['frontend/app', 'backend/api'],
+        ),
+        (
+            'Compare owner/repo1; owner/repo2; owner/repo3 for differences',
+            ['owner/repo1', 'owner/repo2', 'owner/repo3'],
         ),
         # Trailing dot must not leak a date as a repo.
         ('It is due on 1/2.', []),
