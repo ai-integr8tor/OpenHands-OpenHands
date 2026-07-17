@@ -159,23 +159,20 @@ class SlackNewConversationView(SlackViewInterface):
                 + '\n'.join(trigger_attachment_descriptions)
             )
 
-        conversation_instructions = ''
-
-        if len(messages) > 1:
-            messages.pop()
-            context_messages = [
-                formatted_message
-                for message in messages
-                if (formatted_message := self._format_slack_message_context(message))
-            ]
-            conversation_instructions_template = jinja_env.get_template(
-                'user_message_conversation_instructions.j2'
-            )
-            conversation_instructions = conversation_instructions_template.render(
-                messages=context_messages,
-                username=user_info.slack_display_name,
-                conversation_url=CONVERSATION_URL,
-            )
+        messages.pop()
+        context_messages = [
+            formatted_message
+            for message in messages
+            if (formatted_message := self._format_slack_message_context(message))
+        ]
+        conversation_instructions_template = jinja_env.get_template(
+            'user_message_conversation_instructions.j2'
+        )
+        conversation_instructions = conversation_instructions_template.render(
+            messages=context_messages,
+            username=user_info.slack_display_name,
+            conversation_url=CONVERSATION_URL,
+        )
 
         return user_message, conversation_instructions
 
