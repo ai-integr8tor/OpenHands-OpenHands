@@ -1797,13 +1797,17 @@ class LiveStatusAppConversationService(AppConversationServiceBase):
             user, llm_model, conversation_id
         )
 
-        # --- system_message_suffix (planning-agent prefix) ------------------
-        effective_suffix = system_message_suffix
+        # --- system_message_suffix (user suffix + planning-agent prefix) ------
+        saved_agent_context = getattr(user.agent_settings, 'agent_context', None)
+        saved_system_message_suffix = getattr(
+            saved_agent_context, 'system_message_suffix', None
+        )
+        base_suffix = system_message_suffix or saved_system_message_suffix
+
+        effective_suffix = base_suffix
         if agent_type == AgentType.PLAN:
-            if system_message_suffix:
-                effective_suffix = (
-                    f'{PLANNING_AGENT_INSTRUCTION}\n\n{system_message_suffix}'
-                )
+            if base_suffix:
+                effective_suffix = f'{PLANNING_AGENT_INSTRUCTION}\n\n{base_suffix}'
             else:
                 effective_suffix = PLANNING_AGENT_INSTRUCTION
 
