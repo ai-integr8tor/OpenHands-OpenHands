@@ -93,28 +93,39 @@ async def test_search_branches_gitlab_uses_search_param():
             'protected': True,
         },
     ]
+    headers = {
+        'Link': '<https://gitlab.com/api/v4/projects/1/repository/branches?page=3>; rel="next"',
+        'X-Total': '5',
+    }
 
-    with patch.object(service, '_make_request', return_value=(mock_response, {})) as m:
-        branches = await service.search_branches(
-            'group/repo', query='feat', per_page=50
+    with patch.object(
+        service, '_make_request', return_value=(mock_response, headers)
+    ) as m:
+        result = await service.get_paginated_branches(
+            'group/repo', page=2, per_page=50, query='feat'
         )
 
-        # Verify parameters
-        args, kwargs = m.call_args
+        # Verify parameters: search filter + pagination are both sent
+        args, _kwargs = m.call_args
         url = args[0]
         params = args[1]
         assert 'repository/branches' in url
         assert params['per_page'] == '50'
+        assert params['page'] == '2'
         assert params['search'] == 'feat'
 
-        assert len(branches) == 2
-        assert branches[0] == Branch(
+        assert isinstance(result, PaginatedBranchesResponse)
+        assert result.current_page == 2
+        assert result.has_next_page is True
+        assert result.total_count == 5
+        assert len(result.branches) == 2
+        assert result.branches[0] == Branch(
             name='feat/new',
             commit_sha='111',
             protected=False,
             last_push_date='2024-01-04T00:00:00Z',
         )
-        assert branches[1] == Branch(
+        assert result.branches[1] == Branch(
             name='feature/xyz',
             commit_sha='222',
             protected=True,

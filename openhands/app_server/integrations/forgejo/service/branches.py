@@ -25,8 +25,17 @@ class ForgejoBranchesMixin(ForgejoMixinBase):
         return branches
 
     async def get_paginated_branches(
-        self, repository: str, page: int = 1, per_page: int = 30
+        self,
+        repository: str,
+        page: int = 1,
+        per_page: int = 30,
+        query: str | None = None,
     ) -> PaginatedBranchesResponse:  # type: ignore[override]
+        if query:
+            return await self._search_paginated_branches(
+                repository, page, per_page, query
+            )
+
         owner, repo = self._split_repo(repository)
         url = self._build_repo_api_url(owner, repo, 'branches')
         params = {
@@ -67,11 +76,26 @@ class ForgejoBranchesMixin(ForgejoMixinBase):
             total_count=total_count,
         )
 
-    async def search_branches(
-        self, repository: str, query: str, per_page: int = 30
-    ) -> list[Branch]:  # type: ignore[override]
+    async def _search_paginated_branches(
+        self, repository: str, page: int, per_page: int, query: str
+    ) -> PaginatedBranchesResponse:
+        """Filter branches by name client-side, then paginate.
+
+        Forgejo's branches API has no server-side search parameter, so all
+        branches are fetched, filtered, and paginated in-process.
+        """
         all_branches = await self.get_branches(repository)
         lowered = query.lower()
-        return [branch for branch in all_branches if lowered in branch.name.lower()][
-            :per_page
-        ]
+        matches = [branch for branch in all_branches if lowered in branch.name.lower()]
+
+        start = (page - 1) * per_page
+        page_branches = matches[start : start + per_page]
+        has_next_page = len(matches) > start + per_page
+
+        return PaginatedBranchesResponse(
+            branches=page_branches,
+            has_next_page=has_next_page,
+            current_page=page,
+            per_page=per_page,
+            total_count=len(matches),
+        )

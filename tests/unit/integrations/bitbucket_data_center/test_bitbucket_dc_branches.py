@@ -1,4 +1,4 @@
-"""Tests for BitbucketDCBranchesMixin: get_paginated_branches, search_branches, get_branches."""
+"""Tests for BitbucketDCBranchesMixin: get_paginated_branches (list + search), get_branches."""
 
 from unittest.mock import patch
 
@@ -107,21 +107,29 @@ async def test_get_paginated_branches_total_count():
 @pytest.mark.asyncio
 async def test_search_branches_uses_filter_text():
     svc = make_service()
-    mock_response = {'values': [_dc_branch('feature/my-thing', 'sha1')]}
+    mock_response = {
+        'values': [_dc_branch('feature/my-thing', 'sha1')],
+        'isLastPage': False,
+        'size': 3,
+    }
 
     with patch.object(
         svc, '_make_request', return_value=(mock_response, {})
     ) as mock_req:
-        branches = await svc.search_branches(
-            'PROJ/myrepo', query='my-thing', per_page=15
+        res = await svc.get_paginated_branches(
+            'PROJ/myrepo', page=1, per_page=15, query='my-thing'
         )
 
     call_url, call_params = mock_req.call_args[0]
     assert 'filterText' in call_params
     assert call_params['filterText'] == 'my-thing'
+    assert call_params['limit'] == 15
+    assert call_params['start'] == 0
     assert 'q' not in call_params
-    assert len(branches) == 1
-    assert branches[0].name == 'feature/my-thing'
+    assert res.has_next_page is True
+    assert res.total_count == 3
+    assert len(res.branches) == 1
+    assert res.branches[0].name == 'feature/my-thing'
 
 
 # ── get_branches (all pages via _fetch_paginated_data) ───────────────────────

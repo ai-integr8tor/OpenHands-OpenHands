@@ -31,7 +31,6 @@ from openhands.app_server.integrations.gitlab.constants import GITLAB_HOST
 from openhands.app_server.integrations.gitlab.gitlab_service import GitLabServiceImpl
 from openhands.app_server.integrations.service_types import (
     AuthenticationError,
-    Branch,
     GitService,
     InstallationsService,
     PaginatedBranchesResponse,
@@ -323,33 +322,6 @@ class ProviderHandler:
 
         return tasks
 
-    async def search_branches(
-        self,
-        selected_provider: ProviderType | None,
-        repository: str,
-        query: str,
-        per_page: int = 30,
-    ) -> list[Branch]:
-        """Search for branches within a repository using the appropriate provider service."""
-        if selected_provider:
-            service = self.get_service(selected_provider)
-            try:
-                return await service.search_branches(repository, query, per_page)
-            except Exception as e:
-                logger.warning(
-                    f'Error searching branches from selected provider {selected_provider}: {e}'
-                )
-                return []
-
-        # If provider not specified, determine provider by verifying repository access
-        try:
-            repo_details = await self.verify_repo_provider(repository)
-            service = self.get_service(repo_details.git_provider)
-            return await service.search_branches(repository, query, per_page)
-        except Exception as e:
-            logger.warning(f'Error searching branches for {repository}: {e}')
-            return []
-
     async def search_repositories(
         self,
         selected_provider: ProviderType | None,
@@ -460,6 +432,7 @@ class ProviderHandler:
         specified_provider: ProviderType | None = None,
         page: int = 1,
         per_page: int = 30,
+        query: str | None = None,
     ) -> PaginatedBranchesResponse:
         """Get branches for a repository
 
@@ -468,6 +441,9 @@ class ProviderHandler:
             specified_provider: Optional provider type to use
             page: Page number for pagination (default: 1)
             per_page: Number of branches per page (default: 30)
+            query: Optional branch name filter. When provided, only branches
+                matching the query are returned, paginated the same way as a
+                plain listing.
 
         Returns:
             A paginated response with branches for the repository
@@ -475,7 +451,9 @@ class ProviderHandler:
         if specified_provider:
             try:
                 service = self.get_service(specified_provider)
-                return await service.get_paginated_branches(repository, page, per_page)
+                return await service.get_paginated_branches(
+                    repository, page, per_page, query
+                )
             except Exception as e:
                 logger.warning(
                     f'Error fetching branches from {specified_provider}: {e}'
@@ -484,7 +462,9 @@ class ProviderHandler:
         for provider in self.provider_tokens:
             try:
                 service = self.get_service(provider)
-                return await service.get_paginated_branches(repository, page, per_page)
+                return await service.get_paginated_branches(
+                    repository, page, per_page, query
+                )
             except Exception as e:
                 logger.warning(f'Error fetching branches from {provider}: {e}')
 

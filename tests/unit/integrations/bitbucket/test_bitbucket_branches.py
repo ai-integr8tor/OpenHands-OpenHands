@@ -65,21 +65,29 @@ async def test_search_branches_bitbucket_filters_by_name_contains():
                 'name': 'bugfix/issue-1',
                 'target': {'hash': 'hhh', 'date': '2024-01-10T10:00:00Z'},
             }
-        ]
+        ],
+        'next': 'https://api.bitbucket.org/2.0/repositories/w/r/refs/branches?page=2',
+        'size': 4,
     }
 
     with patch.object(service, '_make_request', return_value=(mock_response, {})) as m:
-        branches = await service.search_branches('w/r', query='bugfix', per_page=15)
+        res = await service.get_paginated_branches(
+            'w/r', page=1, per_page=15, query='bugfix'
+        )
 
-        args, kwargs = m.call_args
+        args, _kwargs = m.call_args
         url = args[0]
         params = args[1]
         assert 'refs/branches' in url
         assert params['pagelen'] == 15
+        assert params['page'] == 1
         assert params['q'] == 'name~"bugfix"'
         assert params['sort'] == '-target.date'
 
-        assert branches == [
+        assert isinstance(res, PaginatedBranchesResponse)
+        assert res.has_next_page is True
+        assert res.total_count == 4
+        assert res.branches == [
             Branch(
                 name='bugfix/issue-1',
                 commit_sha='hhh',

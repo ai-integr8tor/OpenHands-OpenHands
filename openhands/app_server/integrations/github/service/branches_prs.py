@@ -61,9 +61,23 @@ class GitHubBranchesMixin(GitHubMixinBase):
         return all_branches
 
     async def get_paginated_branches(
-        self, repository: str, page: int = 1, per_page: int = 30
+        self,
+        repository: str,
+        page: int = 1,
+        per_page: int = 30,
+        query: str | None = None,
     ) -> PaginatedBranchesResponse:
-        """Get branches for a repository with pagination"""
+        """Get branches for a repository with pagination.
+
+        When ``query`` is provided, branches are filtered by name using the
+        GitHub GraphQL ``refs`` search and paginated with the same page/per_page
+        contract used for plain listing.
+        """
+        if query:
+            return await self._search_paginated_branches(
+                repository, page, per_page, query
+            )
+
         url = f'{self.BASE_URL}/repos/{repository}/branches'
 
         params = {'per_page': str(per_page), 'page': str(page)}
@@ -102,28 +116,36 @@ class GitHubBranchesMixin(GitHubMixinBase):
             total_count=None,  # GitHub doesn't provide total count in branch API
         )
 
-    async def search_branches(
-        self, repository: str, query: str, per_page: int = 30
-    ) -> list[Branch]:
-        """Search branches by name using GitHub GraphQL with a partial query."""
-        # Require a non-empty query
-        if not query:
-            return []
+    async def _search_paginated_branches(
+        self, repository: str, page: int, per_page: int, query: str
+    ) -> PaginatedBranchesResponse:
+        """Search branches by name via GitHub GraphQL with page-based pagination.
 
-        # Clamp per_page to GitHub GraphQL limits
+        GitHub's GraphQL ``refs`` connection is cursor-based; we emulate
+        page-based pagination by fetching up to ``page * per_page`` matches
+        (clamped to GitHub's 100-item limit) and slicing the requested page.
+        """
+        # GitHub GraphQL caps the connection page size at 100.
         per_page = min(max(per_page, 1), 100)
+        fetch_count = min(max(page, 1) * per_page, 100)
 
         # Extract owner and repo name from the repository string
         parts = repository.split('/')
         if len(parts) < 2:
-            return []
+            return PaginatedBranchesResponse(
+                branches=[],
+                has_next_page=False,
+                current_page=page,
+                per_page=per_page,
+                total_count=0,
+            )
         owner, name = parts[-2], parts[-1]
 
         variables = {
             'owner': owner,
             'name': name,
-            'query': query or '',
-            'perPage': per_page,
+            'query': query,
+            'perPage': fetch_count,
         }
 
         try:
@@ -133,14 +155,27 @@ class GitHubBranchesMixin(GitHubMixinBase):
         except Exception as e:
             logger.warning(f'Failed to search for branches: {e}')
             # Fallback to empty result on any GraphQL error
-            return []
+            return PaginatedBranchesResponse(
+                branches=[],
+                has_next_page=False,
+                current_page=page,
+                per_page=per_page,
+                total_count=None,
+            )
 
         repo = result.get('data', {}).get('repository')
-        if not repo or not repo.get('refs'):
-            return []
+        refs = repo.get('refs') if repo else None
+        if not refs:
+            return PaginatedBranchesResponse(
+                branches=[],
+                has_next_page=False,
+                current_page=page,
+                per_page=per_page,
+                total_count=0,
+            )
 
-        branches: list[Branch] = []
-        for node in repo['refs'].get('nodes', []):
+        all_branches: list[Branch] = []
+        for node in refs.get('nodes', []):
             bname = node.get('name') or ''
             target = node.get('target') or {}
             typename = target.get('__typename')
@@ -152,7 +187,7 @@ class GitHubBranchesMixin(GitHubMixinBase):
 
             protected = node.get('branchProtectionRule') is not None
 
-            branches.append(
+            all_branches.append(
                 Branch(
                     name=bname,
                     commit_sha=commit_sha,
@@ -161,4 +196,19 @@ class GitHubBranchesMixin(GitHubMixinBase):
                 )
             )
 
-        return branches
+        start = (page - 1) * per_page
+        page_branches = all_branches[start : start + per_page]
+
+        # There is a next page if either the current fetch already holds more
+        # matches beyond this page, or GraphQL reports additional matches that
+        # were truncated by the 100-item fetch limit.
+        graphql_has_next = bool(refs.get('pageInfo', {}).get('hasNextPage'))
+        has_next_page = len(all_branches) > start + per_page or graphql_has_next
+
+        return PaginatedBranchesResponse(
+            branches=page_branches,
+            has_next_page=has_next_page,
+            current_page=page,
+            per_page=per_page,
+            total_count=refs.get('totalCount'),
+        )

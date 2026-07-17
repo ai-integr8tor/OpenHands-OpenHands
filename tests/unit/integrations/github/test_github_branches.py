@@ -94,6 +94,8 @@ async def test_search_branches_github_success_and_variables():
         'data': {
             'repository': {
                 'refs': {
+                    'totalCount': 2,
+                    'pageInfo': {'hasNextPage': False},
                     'nodes': [
                         {
                             'name': 'feature/bar',
@@ -112,7 +114,7 @@ async def test_search_branches_github_success_and_variables():
                             },
                             'branchProtectionRule': None,
                         },
-                    ]
+                    ],
                 }
             }
         }
@@ -120,19 +122,24 @@ async def test_search_branches_github_success_and_variables():
 
     exec_mock = AsyncMock(return_value=graphql_result)
     with patch.object(service, 'execute_graphql_query', exec_mock) as mock_exec:
-        branches = await service.search_branches('foo/bar', query='fe', per_page=999)
+        result = await service.get_paginated_branches(
+            'foo/bar', page=1, per_page=999, query='fe'
+        )
 
         # per_page should be clamped to <= 100 when passed to GraphQL variables
-        args, kwargs = mock_exec.call_args
-        _query = args[0]
+        args, _kwargs = mock_exec.call_args
         variables = args[1]
         assert variables['owner'] == 'foo'
         assert variables['name'] == 'bar'
         assert variables['query'] == 'fe'
         assert 1 <= variables['perPage'] <= 100
 
-        assert len(branches) == 2
-        b0, b1 = branches
+        assert isinstance(result, PaginatedBranchesResponse)
+        assert result.current_page == 1
+        assert result.total_count == 2
+        assert result.has_next_page is False
+        assert len(result.branches) == 2
+        b0, b1 = result.branches
         assert b0.name == 'feature/bar'
         assert b0.commit_sha == 'aaa111'
         assert b0.protected is True
@@ -146,18 +153,59 @@ async def test_search_branches_github_success_and_variables():
 
 
 @pytest.mark.asyncio
+async def test_search_branches_github_paginates_results():
+    """Search results are paginated by page/per_page using GraphQL slicing."""
+    service = GitHubService(token=SecretStr('t'))
+
+    nodes = [
+        {
+            'name': f'feature/{i}',
+            'target': {
+                '__typename': 'Commit',
+                'oid': f'sha{i}',
+                'committedDate': '2024-01-05T10:00:00Z',
+            },
+            'branchProtectionRule': None,
+        }
+        for i in range(3)
+    ]
+    graphql_result = {
+        'data': {
+            'repository': {
+                'refs': {
+                    'totalCount': 3,
+                    'pageInfo': {'hasNextPage': False},
+                    'nodes': nodes,
+                }
+            }
+        }
+    }
+
+    exec_mock = AsyncMock(return_value=graphql_result)
+    with patch.object(service, 'execute_graphql_query', exec_mock):
+        page1 = await service.get_paginated_branches(
+            'foo/bar', page=1, per_page=2, query='feature'
+        )
+        assert [b.name for b in page1.branches] == ['feature/0', 'feature/1']
+        assert page1.has_next_page is True
+
+        page2 = await service.get_paginated_branches(
+            'foo/bar', page=2, per_page=2, query='feature'
+        )
+        assert [b.name for b in page2.branches] == ['feature/2']
+        assert page2.has_next_page is False
+
+
+@pytest.mark.asyncio
 async def test_search_branches_github_edge_cases():
     service = GitHubService(token=SecretStr('t'))
 
-    # Empty query should return [] without issuing a GraphQL call
-    branches = await service.search_branches('foo/bar', query='')
-    assert branches == []
-
-    # Invalid repository string should return [] without calling GraphQL
+    # Invalid repository string should return an empty page without calling GraphQL
     exec_mock = AsyncMock()
     with patch.object(service, 'execute_graphql_query', exec_mock):
-        branches = await service.search_branches('invalidrepo', query='q')
-        assert branches == []
+        result = await service.get_paginated_branches('invalidrepo', query='q')
+        assert isinstance(result, PaginatedBranchesResponse)
+        assert result.branches == []
         exec_mock.assert_not_called()
 
 
@@ -167,5 +215,7 @@ async def test_search_branches_github_graphql_error_returns_empty():
 
     exec_mock = AsyncMock(side_effect=Exception('Boom'))
     with patch.object(service, 'execute_graphql_query', exec_mock):
-        branches = await service.search_branches('foo/bar', query='q')
-        assert branches == []
+        result = await service.get_paginated_branches('foo/bar', query='q')
+        assert isinstance(result, PaginatedBranchesResponse)
+        assert result.branches == []
+        assert result.has_next_page is False
