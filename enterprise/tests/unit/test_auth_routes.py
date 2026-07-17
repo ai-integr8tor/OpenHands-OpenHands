@@ -307,6 +307,87 @@ async def test_keycloak_callback_success_with_valid_offline_token(
 
 
 @pytest.mark.asyncio
+async def test_keycloak_callback_idp_token_failure_non_fatal(
+    mock_request, mock_background_tasks, create_keycloak_user_info
+):
+    """A store_idp_tokens failure (realm-local user with no broker link) must not
+    500 the callback — login should still complete."""
+    mock_org = MagicMock()
+    mock_org.id = 'test_org_id'
+    mock_org.name = 'Test Org'
+
+    with (
+        patch('server.routes.auth.token_manager') as mock_token_manager,
+        patch('server.routes.auth.set_response_cookie'),
+        patch('server.routes.auth.UserStore') as mock_user_store,
+        patch('server.routes.auth.get_analytics_service', return_value=MagicMock()),
+        patch(
+            'storage.org_store.OrgStore.get_org_by_id',
+            new_callable=AsyncMock,
+            return_value=mock_org,
+        ),
+        patch(
+            'storage.org_store.OrgStore.get_orgs_by_ids',
+            new_callable=AsyncMock,
+            return_value=[mock_org],
+        ),
+        patch(
+            'storage.org_member_store.OrgMemberStore.get_org_members_count',
+            new_callable=AsyncMock,
+            return_value=1,
+        ),
+        patch(
+            'server.routes.auth._should_redirect_to_onboarding',
+            new_callable=AsyncMock,
+            return_value=False,
+        ),
+    ):
+        mock_user = MagicMock()
+        mock_user.id = 'test_user_id'
+        mock_user.current_org_id = 'test_org_id'
+        mock_user.accepted_tos = '2025-01-01'
+        mock_user.user_consents_to_analytics = True
+        mock_user.org_members = []
+
+        mock_user_store.get_user_by_id = AsyncMock(return_value=mock_user)
+        mock_user_store.create_user = AsyncMock(return_value=mock_user)
+        mock_user_store.migrate_user = AsyncMock(return_value=mock_user)
+        mock_user_store.backfill_contact_name = AsyncMock()
+        mock_user_store.backfill_user_email = AsyncMock()
+
+        mock_token_manager.get_keycloak_tokens = AsyncMock(
+            return_value=('test_access_token', 'test_refresh_token')
+        )
+        mock_token_manager.get_user_info = AsyncMock(
+            return_value=create_keycloak_user_info(
+                sub='test_user_id',
+                preferred_username='test_user',
+                identity_provider='github',
+                email_verified=True,
+            )
+        )
+        # Realm-local user: no brokered IdP link, so the broker fetch 400s.
+        mock_token_manager.store_idp_tokens = AsyncMock(
+            side_effect=Exception('400 from broker endpoint')
+        )
+        mock_token_manager.validate_offline_token = AsyncMock(return_value=True)
+
+        result = await keycloak_callback(
+            code='test_code',
+            state='test_state',
+            request=mock_request,
+            background_tasks=mock_background_tasks,
+            user_authorizer=create_mock_user_authorizer(),
+        )
+
+        # Login still completes despite the broker-token failure.
+        assert isinstance(result, RedirectResponse)
+        assert result.status_code == 302
+        assert result.headers['location'] == 'test_state'
+        mock_token_manager.store_idp_tokens.assert_called_once()
+
+
+@pytest.mark.asyncio
 async def test_keycloak_callback_email_not_verified(
     mock_request, mock_background_tasks, create_keycloak_user_info
 ):

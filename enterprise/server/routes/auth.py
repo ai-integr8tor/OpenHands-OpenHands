@@ -457,9 +457,18 @@ async def keycloak_callback(
     # Only fetch/store IdP tokens for OAuth-based IdPs (not SAML)
     # SAML IdPs don't have OAuth tokens to retrieve from Keycloak's broker endpoint
     if idp_type != 'saml':
-        await token_manager.store_idp_tokens(
-            ProviderType(idp), user_id, keycloak_access_token
-        )
+        try:
+            await token_manager.store_idp_tokens(
+                ProviderType(idp), user_id, keycloak_access_token
+            )
+        except Exception:
+            # Realm-local users have no brokered IdP link, so the broker-token
+            # fetch 400s; that must not 500 login — they simply have no IdP tokens.
+            logger.warning(
+                'Failed to store IdP tokens; continuing login without them',
+                extra={'user_id': user_id, 'idp': idp},
+                exc_info=True,
+            )
 
     valid_offline_token = (
         await token_manager.validate_offline_token(user_id=user_info.sub)
