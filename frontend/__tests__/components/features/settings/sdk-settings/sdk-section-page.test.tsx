@@ -387,12 +387,12 @@ describe("SdkSectionPage", () => {
               required: true,
             },
             {
-              key: "llm.timeout",
-              label: "Timeout",
+              key: "llm.temperature",
+              label: "Temperature",
               section: "llm",
               section_label: "LLM",
-              value_type: "integer",
-              default: 30,
+              value_type: "number",
+              default: 0,
               choices: [],
               depends_on: [],
               prominence: "minor",
@@ -451,7 +451,7 @@ describe("SdkSectionPage", () => {
 
     await screen.findByTestId("sdk-section-all-toggle");
     await userEvent.click(screen.getByTestId("sdk-section-all-toggle"));
-    await screen.findByTestId("sdk-settings-llm.timeout");
+    await screen.findByTestId("sdk-settings-llm.temperature");
 
     const endpointInput = await screen.findByTestId(
       "sdk-settings-llm.endpoint",
